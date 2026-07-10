@@ -1,0 +1,22 @@
+# --- ENTORNO VIRTUAL ---
+# Ignorar las librerías locales de Python para que no se suban a GitHub
+venv/
+.venv/
+env/
+ENV/
+
+# --- ARCHIVOS DE CONFIGURACIÓN Y CREDENCIALES ---
+# SÚPER IMPORTANTE: Evita que se filtren tus contraseñas de Aiven de tu archivo .env
+.env
+
+# --- CACHÉ DE PYTHON ---
+# Archivos temporales generados automáticamente por Python
+pycache/
+*.py[cod]
+*$py.class
+
+# --- CONFIGURACIONES DE EDITORES ---
+# Archivos internos de VS Code sobre el historial de tu PC
+.vscode/
+.idea/
+.DS_Store
