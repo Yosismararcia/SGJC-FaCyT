@@ -111,10 +111,20 @@ def inicializar_base_de_datos():
                     [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)]
                 )
 
-            conexion.commit()
+                # ---- INSERCIÓN DE DATOS SEMILLA ----
+           # Personal Autorizado de prueba (INSERT IGNORE evita duplicados si ya existen)
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany(
+                "INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);",
+                usuarios_autorizados
+            )
+        conexion.commit()
     finally:
         conexion.close()
-
 # ==================== RUTA DE PRUEBA GENERAL ====================
 
 @app.route('/')
