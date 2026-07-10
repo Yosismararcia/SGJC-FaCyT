@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Editar Actividad</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Modificar Propuesta</h1>
+            <p class="text-xs text-blue-200">Edita los detalles de tu actividad antes de su aprobación</p>
+        </div>
+        <a href="{{ url_for('ver_historial') }}" class="bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Historial
+        </a>
+    </nav>
+
+    <!-- Contenido -->
+    <main class="flex-grow flex items-center justify-center p-6">
+        <div class="bg-white rounded-lg shadow-md border border-gray-200 max-w-xl w-full p-6">
+            
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="mb-4 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form action="{{ url_for('editar_evento', evento_id=evento.id) }}" method="POST" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Título de la Actividad</label>
+                    <input type="text" name="titulo" value="{{ evento.titulo }}" required class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-900">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Tipo de Actividad</label>
+                    <select name="tipo_actividad" required class="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-900">
+                        <option value="Conferencia" {% if evento.tipo_actividad == 'Conferencia' %}selected{% endif %}>Conferencia</option>
+                        <option value="Taller / Workshop" {% if evento.tipo_actividad == 'Taller / Workshop' %}selected{% endif %}>Taller / Workshop</option>
+                        <option value="Ponencia de Investigación" {% if evento.tipo_actividad == 'Ponencia de Investigación' %}selected{% endif %}>Ponencia de Investigación</option>
+                        <option value="Reunión Académica" {% if evento.tipo_actividad == 'Reunión Académica' %}selected{% endif %}>Reunión Académica</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Fecha Programada</label>
+                    <input type="date" name="fecha" value="{{ evento.fecha }}" required class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-900">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Hora de Inicio</label>
+                        <input type="time" name="hora_inicio" value="{{ evento.hora_inicio }}" required class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-900">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Hora de Culminación</label>
+                        <input type="time" name="hora_fin" value="{{ evento.hora_fin }}" required class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-900">
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-2 rounded text-sm transition">
+                        Guardar Cambios
+                    </button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>

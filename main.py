@@ -1,4 +1,3 @@
-#MODIFICADO PORQUE NO ME DEJABA DARLE CLICK AL BOTON DE CREAER EVENTO
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import pymysql
@@ -38,7 +37,6 @@ def inicializar_base_de_datos():
             if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
 
-# Precarga de Espacios Físicos de la FaCyT si la tabla está vacía
             if cursor.execute("SELECT COUNT(*) AS total FROM espacios;") and cursor.fetchone()['total'] == 0:
                 espacios_facyt = [
                     ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
@@ -53,8 +51,7 @@ def inicializar_base_de_datos():
                 ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
             ]
             cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
-            
-# ---------------CORRECCIÓN DE RAÍZ: Insertar solo si NO existe para mantener estable el ID autoincremental
+
             cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
             if not cursor.fetchone():
                 cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
@@ -63,13 +60,6 @@ def inicializar_base_de_datos():
                 cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
             
             conexion.commit()
-            """
-            cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
-            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
-            role_id = cursor.fetchone()['id']
-            pass_hash = generate_password_hash('admin123')
-            cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
-            conexion.commit()"""
     finally:
         conexion.close()
 
@@ -142,7 +132,6 @@ def register():
 
 @app.route('/proponer', methods=['GET', 'POST'])
 def proponer_evento():
-    # Protección de ruta: si no está logueado, va al login
     if 'usuario_id' in session:
         if request.method == 'POST':
             titulo = request.form['titulo'].strip()
@@ -152,7 +141,6 @@ def proponer_evento():
             hora_fin = request.form['hora_fin']
             creador_id = session['usuario_id']
 
-            # Validación básica de tiempos lógicos
             if hora_inicio >= hora_fin:
                 flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
                 return render_template('proponer.html')
@@ -160,10 +148,9 @@ def proponer_evento():
             conexion = obtener_conexion()
             try:
                 with conexion.cursor() as cursor:
-                    # Buscamos el ID asignado al estado por defecto 'Propuesto'
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
                     estado_id = cursor.fetchone()['id']
-                    # Insertamos el evento ligando la propuesta al usuario actual
+
                     sql_evento = """
                         INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
                         VALUES (%s, %s, %s, %s, %s, %s, %s);
@@ -189,9 +176,8 @@ def ver_historial():
         eventos = []
         try:
             with conexion.cursor() as cursor:
-                # Consulta relacional con JOINs para traer los nombres del estado y del espacio
                 sql = """
-                    SELECT e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
                            est.nombre AS estado_nombre, esp.nombre AS espacio_nombre
                     FROM eventos e
                     JOIN estados est ON e.estado_id = est.id
@@ -201,8 +187,6 @@ def ver_historial():
                 """
                 cursor.execute(sql, (creador_id,))
                 eventos = cursor.fetchall()
-                
-                # Conversión opcional de tiempos/fechas a string si es necesario para evitar problemas de tipos en Jinja2
                 for ev in eventos:
                     ev['fecha'] = str(ev['fecha'])
                     ev['hora_inicio'] = str(ev['hora_inicio'])
@@ -211,21 +195,91 @@ def ver_historial():
             flash(f'Error al cargar el historial: {str(e)}', 'error')
         finally:
             conexion.close()
-
         return render_template('historial.html', eventos=eventos)
     return redirect(url_for('login'))
 
-#----------- NUEVA MODIFICACION AGREGADA DE LOS ADMIN PENDIENTES
+@app.route('/evento/editar/<int:evento_id>', methods=['GET', 'POST'])
+def editar_evento(evento_id):
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # Verificar pertenencia y estado (Solo se editan si están 'Propuestos')
+                cursor.execute("""
+                    SELECT e.*, est.nombre AS estado_nombre 
+                    FROM eventos e 
+                    JOIN estados est ON e.estado_id = est.id 
+                    WHERE e.id = %s AND e.creador_id = %s;
+                """, (evento_id, session['usuario_id']))
+                evento = cursor.fetchone()
+
+                if not border or evento['estado_nombre'] != 'Propuesto':
+                    flash('No puedes modificar un evento que ya fue procesado o no te pertenece.', 'error')
+                    return redirect(url_for('ver_historial'))
+
+                if request.method == 'POST':
+                    titulo = request.form['titulo'].strip()
+                    tipo_actividad = request.form['tipo_actividad']
+                    fecha = request.form['fecha']
+                    hora_inicio = request.form['hora_inicio']
+                    hora_fin = request.form['hora_fin']
+
+                    if hora_inicio >= hora_fin:
+                        flash('Error: La hora de inicio debe ser anterior.', 'error')
+                        return redirect(url_for('editar_evento', evento_id=evento_id))
+
+                    cursor.execute("""
+                        UPDATE eventos 
+                        SET titulo = %s, tipo_actividad = %s, fecha = %s, hora_inicio = %s, hora_fin = %s 
+                        WHERE id = %s;
+                    """, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, evento_id))
+                    conexion.commit()
+                    flash('Propuesta actualizada correctamente.', 'success')
+                    return redirect(url_for('ver_historial'))
+
+                # Formatear datos para el HTML
+                evento['fecha'] = str(evento['fecha'])
+                evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
+                evento['hora_fin'] = str(evento['hora_fin'])[:5]
+                return render_template('editar_eventos.html', evento=evento)
+        finally:
+            conexion.close()
+    return redirect(url_for('login'))
+
+@app.route('/evento/eliminar/<int:evento_id>')
+def eliminar_evento(evento_id):
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # Comprobar seguridad antes de borrar
+                cursor.execute("""
+                    SELECT e.*, est.nombre AS estado_nombre 
+                    FROM eventos e 
+                    JOIN estados est ON e.estado_id = est.id 
+                    WHERE e.id = %s AND e.creador_id = %s;
+                """, (evento_id, session['usuario_id']))
+                evento = cursor.fetchone()
+
+                if evento and evento['estado_nombre'] == 'Propuesto':
+                    cursor.execute("DELETE FROM eventos WHERE id = %s;", (evento_id,))
+                    conexion.commit()
+                    flash('La propuesta ha sido eliminada permanentemente.', 'success')
+                else:
+                    flash('No puedes eliminar este evento.', 'error')
+        finally:
+            conexion.close()
+        return redirect(url_for('ver_historial'))
+    return redirect(url_for('login'))
+
 @app.route('/admin/pendientes')
 def admin_pendientes():
-    # Seguridad: Solo los Admin pueden entrar aquí
     if 'usuario_id' in session and session.get('rol') == 'Admin':
         conexion = obtener_conexion()
         solicitudes = []
         espacios = []
         try:
             with conexion.cursor() as cursor:
-                # 1. Buscar eventos con estatus 'Propuesto'
                 sql_solicitudes = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
                            u.nombre_completo AS solicitante, u.cedula
@@ -242,7 +296,6 @@ def admin_pendientes():
                     s['hora_inicio'] = str(s['hora_inicio'])
                     s['hora_fin'] = str(s['hora_fin'])
 
-                # 2. Buscar espacios físicos disponibles para llenar el menú desplegable
                 cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
                 espacios = cursor.fetchall()
         finally:
@@ -261,11 +314,7 @@ def procesar_solicitud(evento_id):
                 if accion == 'aprobar':
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
                     estado_id = cursor.fetchone()['id']
-                    # Se actualiza el evento con el espacio seleccionado y el nuevo estatus
-                    cursor.execute(
-                        "UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;", 
-                        (estado_id, espacio_id, evento_id)
-                    )
+                    cursor.execute("UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;", (estado_id, espacio_id, evento_id))
                     flash('Evento aprobado correctamente con espacio asignado.', 'success')
                 elif accion == 'cancelar':
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
@@ -287,151 +336,3 @@ def logout():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""from flask import Flask, jsonify
-from flask_sqlalchemy import SQLAlchemy
-import os
-
-app = Flask(__name__)
-
-# 1. Recuperamos las variables que configuraste en Render (u tu .env local)
-DB_USER = os.environ.get("DB_USER")
-DB_PASSWORD = os.environ.get("DB_PASSWORD")
-DB_HOST = os.environ.get("DB_HOST")
-DB_PORT = os.environ.get("DB_PORT", "3306")
-DB_NAME = os.environ.get("DB_NAME", "defaultdb")
-
-# 2. Armamos la URL de conexión adaptada para Aiven MySQL utilizando SSL nativo
-# Usamos ssl_verify_cert=True y el llavero de certificados por defecto de Linux (/etc/ssl/certs/ca-certificates.crt)
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl_ca=/etc/ssl/certs/ca-certificates.crt"
-
-app.config['SQLALCHEMY_DATABASE_URL'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db = SQLAlchemy(app)
-
-@app.route('/')
-def home():
-    try:
-        # Hacemos una consulta rápida de prueba a la base de datos para verificar conexión
-        db.session.execute('SELECT 1')
-        db_status = "Conexión exitosa a Aiven MySQL"
-    except Exception as e:
-        db_status = f"Error de conexión: {str(e)}"
-
-    return jsonify({
-        "status": "ok",
-        "message": "Backend corriendo en Render con Flask",
-        "database_status": db_status
-    })
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-
-
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""from flask import Flask, jsonify
-import os
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return jsonify({
-        "status": "ok",
-        "message": "Backend corriendo en Render con Flask con éxito"
-    })
-
-if __name__ == '__main__':
-    # Esto es solo para correrlo local en WSL2
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
-"""
