@@ -7,8 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'clave_secreta_super_segura_facyt_2026')
-
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')  # Cambia esto por una clave secreta segura en producción
 def obtener_conexion():
     return pymysql.connect(
         host=os.getenv('DB_HOST'),
@@ -213,7 +212,7 @@ def editar_evento(evento_id):
                 """, (evento_id, session['usuario_id']))
                 evento = cursor.fetchone()
 
-                if not border or evento['estado_nombre'] != 'Propuesto':
+                if not evento or evento['estado_nombre'] != 'Propuesto':
                     flash('No puedes modificar un evento que ya fue procesado o no te pertenece.', 'error')
                     return redirect(url_for('ver_historial'))
 
@@ -241,7 +240,7 @@ def editar_evento(evento_id):
                 evento['fecha'] = str(evento['fecha'])
                 evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
                 evento['hora_fin'] = str(evento['hora_fin'])[:5]
-                return render_template('editar_eventos.html', evento=evento)
+                return render_template('editar_evento.html', evento=evento)
         finally:
             conexion.close()
     return redirect(url_for('login'))
