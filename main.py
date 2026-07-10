@@ -1,3 +1,4 @@
+#MODIFICADO PORQUE NO ME DEJABA DARLE CLICK AL BOTON DE CREAER EVENTO
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import pymysql
@@ -20,13 +21,10 @@ def obtener_conexion():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# ==================== INICIALIZACIÓN DE LA BASE DE DATOS ====================
-
 def inicializar_base_de_datos():
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # Creación de tablas base
             cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
             cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
             cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
@@ -34,16 +32,12 @@ def inicializar_base_de_datos():
             cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
             cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
 
-            # Semillas básicas
-            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
-            if cursor.fetchone()['total'] == 0:
+            if cursor.execute("SELECT COUNT(*) AS total FROM roles;") and cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
 
-            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
-            if cursor.fetchone()['total'] == 0:
+            if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
 
-            # Lista blanca de prueba
             usuarios_autorizados = [
                 ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
                 ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
@@ -51,59 +45,33 @@ def inicializar_base_de_datos():
             ]
             cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
 
-            # PARCHE SEGURO: Limpiamos e insertamos al Admin de pruebas con hash fresco para asegurar login
             cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
-            
             cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
             role_id = cursor.fetchone()['id']
-            
             pass_hash = generate_password_hash('admin123')
-            cursor.execute(
-                "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);",
-                ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id)
-            )
-
+            cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
             conexion.commit()
     finally:
         conexion.close()
 
-# ==================== RUTAS DEL SISTEMA ====================
-#ruta principal del sistema
-""" modificado por el siguiente codigo para dasboard de eventos
 @app.route('/')
 def home():
     inicializar_base_de_datos()
     if 'usuario_id' in session:
-        return f"<h1>¡Inicio de Sesión Exitoso! Bienvenido {session['nombre']} ({session['rol']})</h1><p>Próximamente Dashboard de Eventos de la FaCyT.</p><a href='/logout'>Cerrar Sesión</a>"
-    return redirect(url_for('login'))
-"""
-@app.route('/')
-def home():
-    inicializar_base_de_datos()
-    if 'usuario_id' in session:
-        # Renderizamos la plantilla limpia pasándole el contexto de la sesión
         return render_template('dashboard.html')
     return redirect(url_for('login'))
 
-#ruta para el login de los usuarios
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         correo = request.form['correo']
         password = request.form['password']
-
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                sql = """
-                    SELECT u.*, r.nombre AS rol_nombre 
-                    FROM usuarios u 
-                    JOIN roles r ON u.role_id = r.id 
-                    WHERE u.correo = %s;
-                """
+                sql = "SELECT u.*, r.nombre AS rol_nombre FROM usuarios u JOIN roles r ON u.role_id = r.id WHERE u.correo = %s;"
                 cursor.execute(sql, (correo,))
                 usuario = cursor.fetchone()
-
                 if usuario and check_password_hash(usuario['password_hash'], password):
                     session['usuario_id'] = usuario['id']
                     session['nombre'] = usuario['nombre_completo']
@@ -114,10 +82,8 @@ def login():
                     flash('Correo o contraseña incorrectos.', 'error')
         finally:
             conexion.close()
-
     return render_template('login.html')
 
-#ruta para los registros de los usuarios
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -129,33 +95,23 @@ def register():
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # 1. VALIDACIÓN CONTRA LA LISTA BLANCA DE LA UNIVERSIDAD
-                cursor.execute(
-                    "SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", 
-                    (cedula, correo)
-                )
+                cursor.execute("SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", (cedula, correo))
                 personal = cursor.fetchone()
 
                 if not personal:
                     flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
                     return redirect(url_for('register'))
 
-                # 2. VERIFICAR SI YA SE HABÍA REGISTRADO ANTES
                 cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
                 if cursor.fetchone():
                     flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
                     return redirect(url_for('register'))
 
-                # 3. IDENTIFICAR EL ID DEL ROL CORRESPONDIENTE
                 cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
                 role_id = cursor.fetchone()['id']
 
-                # 4. ENCRIPTAR CONTRASEÑA E INSERTAR EN USUARIOS DEFINITIVOS
                 password_hash = generate_password_hash(password)
-                sql_insert = """
-                    INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) 
-                    VALUES (%s, %s, %s, %s, %s);
-                """
+                sql_insert = "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);"
                 cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
                 conexion.commit()
 
@@ -163,10 +119,8 @@ def register():
                 return redirect(url_for('login'))
         finally:
             conexion.close()
-
     return render_template('register.html')
 
-#ruta para las propuestas de actividades
 @app.route('/proponer', methods=['GET', 'POST'])
 def proponer_evento():
     # Protección de ruta: si no está logueado, va al login
@@ -190,7 +144,6 @@ def proponer_evento():
                     # Buscamos el ID asignado al estado por defecto 'Propuesto'
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
                     estado_id = cursor.fetchone()['id']
-
                     # Insertamos el evento ligando la propuesta al usuario actual
                     sql_evento = """
                         INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
@@ -209,7 +162,6 @@ def proponer_evento():
         return render_template('proponer.html')
     return redirect(url_for('login'))
 
-#ruta para cerrar sesion
 @app.route('/logout')
 def logout():
     session.clear()
@@ -219,30 +171,6 @@ def logout():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
-"""
-@app.route('/')
-def home():
-    try:
-        inicializar_base_de_datos()
-        db_status = "¡Conexión exitosa! Tablas nativas verificadas/creadas con PyMySQL en Aiven."
-    except Exception as e:
-        db_status = f"Error de conexión nativa: {str(e)}"
-
-    return jsonify({
-        "status": "ok",
-        "message": "Backend del Sistema de Gestión de Eventos FaCyT (Modo Nativo)",
-        "database_status": db_status
-    })
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-"""
-
-
-
-
 
 
 

@@ -1,4 +1,4 @@
-<!-- primera modificacion-->
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -28,7 +28,7 @@
         </div>
     </nav>
 
- <!-- Mensajes Flash globales en el Dashboard -->
+    <!-- Mensajes Flash globales en el Dashboard -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             <div class="max-w-7xl w-full mx-auto px-6 mt-4">
@@ -47,7 +47,7 @@
         <!-- Columna de Información del Usuario -->
         <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
             <div>
-                <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Datos de Usuario</h3>
+                <h3 class="text-lg font-bold text-gray-880 mb-4 border-b pb-2">Datos de Usuario</h3>
                 <div class="space-y-2 text-sm text-gray-600">
                     <p><span class="font-semibold text-gray-700">Cédula:</span> {{ session['cedula'] }}</p>
                     <p><span class="font-semibold text-gray-700">Facultad:</span> Ciencias y Tecnología (FaCyT)</p>
@@ -59,23 +59,22 @@
             </div>
         </div>
 
-        <!-- Columna de Acciones Dinámicas (Depende del Rol) -->
+        <!-- Columna de Acciones Dinámicas -->
         <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 md:col-span-2">
-            <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Acciones Disponibles</h3>
+            <h3 class="text-lg font-bold text-gray-880 mb-4 border-b pb-2">Acciones Disponibles</h3>
             
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 
-                <!-- Acciones para todos los usuarios (Profesores, Estudiantes, Admins) -->
+                <!-- Tarjeta Proponer Actividad VINCULADA -->
                 <div class="p-4 border border-blue-100 bg-blue-50/50 rounded-lg flex flex-col justify-between">
                     <div>
                         <h4 class="font-bold text-blue-900 text-sm mb-1">Proponer Actividad</h4>
                         <p class="text-xs text-gray-500 mb-4">Solicita el espacio y registra una propuesta para conferencias, ponencias o talleres.</p>
                     </div>
-                    <button class="w-full bg-blue-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-blue-800 transition">
+                    <a href="{{ url_for('proponer_evento') }}" class="w-full bg-blue-900 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-blue-800 transition block">
                         Crear Solicitud
-                    </button>
+                    </a>
                 </div>
-
                 <div class="p-4 border border-gray-200 rounded-lg flex flex-col justify-between">
                     <div>
                         <h4 class="font-bold text-gray-800 text-sm mb-1">Mis Eventos</h4>
@@ -85,7 +84,7 @@
                         Ver Historial
                     </button>
                 </div>
-                
+
                 {% if session['rol'] == 'Admin' %}
                 <div class="p-4 border border-purple-100 bg-purple-50/50 rounded-lg flex flex-col justify-between sm:col-span-2">
                     <div>
@@ -109,33 +108,8 @@
             </div>
         </div>
 
- <!--   modificacion            
-                {% if session['rol'] == 'Admin' %}
-                <div class="p-4 border border-purple-100 bg-purple-50/50 rounded-lg flex flex-col justify-between sm:col-span-2">
-                    <div>
-                        <span class="inline-block bg-purple-200 text-purple-800 font-bold text-[10px] px-2 py-0.5 rounded mb-2 uppercase tracking-wide">
-                            Panel de Control Administrativo
-                        </span>
-                        <h4 class="font-bold text-purple-900 text-sm mb-1">Gestión Centralizada</h4>
-                        <p class="text-xs text-gray-500 mb-4">Evalúa solicitudes de eventos pendientes, administra laboratorios/auditorios y realiza cargas de listas blancas masivas.</p>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <button class="bg-purple-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition">
-                            Revisar Solicitudes Pendientes
-                        </button>
-                        <button class="border border-purple-900 text-purple-900 py-1.5 rounded text-xs font-semibold hover:bg-purple-50 transition">
-                            Cargar Personal Autorizado
-                        </button>
-                    </div>
-                </div>
-                {% endif %}
-
-            </div>
-        </div>
--->
     </main>
 
-    <!-- Pie de página -->
     <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs border-t border-gray-700">
         Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) 2026
     </footer>
