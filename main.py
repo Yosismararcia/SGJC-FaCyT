@@ -126,7 +126,61 @@ def inicializar_base_de_datos():
     finally:
         conexion.close()
 # ==================== RUTA DE PRUEBA GENERAL ====================
+# ruta del sistema 
+@app.route('/')
+def home():
+    # Inicializamos la DB al entrar a la raíz
+    inicializar_base_de_datos()
+    # Si ya inició sesión, lo mandamos al dashboard (que crearemos luego)
+    if 'usuario_id' in session:
+        return f"<h1>Bienvenido {session['nombre']} ({session['rol']})</h1><a href='/logout'>Cerrar Sesión</a>"
+    return redirect(url_for('login'))
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        correo = request.form['correo']
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # Consultamos al usuario junto con el nombre de su rol
+                sql = """
+                    SELECT u.*, r.nombre AS rol_nombre 
+                    FROM usuarios u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.correo = %s;
+                """
+                cursor.execute(sql, (correo,))
+                usuario = cursor.fetchone()
+
+                if usuario and check_password_hash(usuario['password_hash'], password):
+                    # Guardamos los datos claves en la sesión de Flask
+                    session['usuario_id'] = usuario['id']
+                    session['nombre'] = usuario['nombre_completo']
+                    session['rol'] = usuario['rol_nombre']
+                    session['cedula'] = usuario['cedula']
+                    
+                    flash('¡Inicio de sesión exitoso!', 'success')
+                    return redirect(url_for('home'))
+                else:
+                    flash('Correo o contraseña incorrectos.', 'error')
+        finally:
+            conexion.close()
+
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'success')
+    return redirect(url_for('login'))
+
+
+
+
+"""
 @app.route('/')
 def home():
     try:
@@ -140,7 +194,7 @@ def home():
         "message": "Backend del Sistema de Gestión de Eventos FaCyT (Modo Nativo)",
         "database_status": db_status
     })
-
+"""
 if __name__ == 'main':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
