@@ -1,114 +1,137 @@
-from flask import Flask, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+#version: 1.0 10-07 1,121
 import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pymysql
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
 
 app = Flask(__name__)
+# Clave secreta para cifrar las cookies de sesión y activar mensajes flash
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
 
-# Configuración de variables de entorno
-DB_USER = os.environ.get("DB_USER")
-DB_PASSWORD = os.environ.get("DB_PASSWORD")
-DB_HOST = os.environ.get("DB_HOST")
-DB_PORT = os.environ.get("DB_PORT", "3306")
-DB_NAME = os.environ.get("DB_NAME", "defaultdb")
+def obtener_conexion():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        database=os.getenv('DB_NAME', 'defaultdb'),
+        ssl_verify_identity=False,
+        cursorclass=pymysql.cursors.DictCursor
+    )
 
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl_check_hostname=0"
+# ==================== CREACIÓN DE TABLAS E INICIALIZACIÓN NATIVA ====================
 
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # 1. Tabla Personal Autorizado
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS personal_autorizado (
+                    cedula VARCHAR(20) PRIMARY KEY,
+                    correo_institucional VARCHAR(100) UNIQUE NOT NULL,
+                    tipo_personal VARCHAR(20) NOT NULL
+                );
+            """)
 
-db = SQLAlchemy(app)
+            # 2. Tabla Roles
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS roles (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
 
-# ==================== MODELOS DE BASE DE DATOS ====================
-# tabla de personal autorizado para el sistema profesores, administrativos y estudiantes
-class PersonalAutorizado(db.Model):
-    tablename = 'personal_autorizado'
-    cedula = db.Column(db.String(20), primary_key=True)
-    correo_institucional = db.Column(db.String(100), unique=True, nullable=False)
-    tipo_personal = db.Column(db.String(20), nullable=False) # 'Admin', 'Profesor', 'Estudiante'
+            # 3. Tabla Usuarios
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre_completo VARCHAR(100) NOT NULL,
+                    correo VARCHAR(100) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    cedula VARCHAR(20) UNIQUE NOT NULL,
+                    role_id INT NOT NULL,
+                    FOREIGN KEY (role_id) REFERENCES roles(id)
+                );
+            """)
 
-# tabla de roles para el sistema
-class Role(db.Model):
-    tablename = 'roles'
-    id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(20), unique=True, nullable=False) # 'Admin', 'Profesor', 'Estudiante'
-    usuarios = db.relationship('Usuario', backref='role', lazy=True)
+            # 4. Tabla Espacios
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS espacios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(50) UNIQUE NOT NULL,
+                    tipo VARCHAR(30) NOT NULL,
+                    capacidad INT NOT NULL,
+                    ubicacion VARCHAR(100) NOT NULL
+                );
+            """)
 
-# tabla de usuarios del sistema
-class Usuario(db.Model):
-    tablename = 'usuarios'
-    id = db.Column(db.Integer, primary_key=True)
-    nombre_completo = db.Column(db.String(100), nullable=False)
-    correo = db.Column(db.String(100), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    cedula = db.Column(db.String(20), unique=True, nullable=False)
-    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=False)
-    eventos = db.relationship('Evento', backref='creador', lazy=True)
+            # 5. Tabla Estados
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS estados (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
 
-# tabla de espacios disponibles para eventos
-class Espacio(db.Model):
-    tablename = 'espacios'
-    id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(50), unique=True, nullable=False) # Ej: 'Auditorio Benito Juarez'
-    tipo = db.Column(db.String(30), nullable=False) # 'Laboratorio', 'Salon', 'Auditorio'
-    capacidad = db.Column(db.Integer, nullable=False)
-    ubicacion = db.Column(db.String(100), nullable=False)
+            # 6. Tabla Eventos
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eventos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    titulo VARCHAR(150) NOT NULL,
+                    tipo_actividad VARCHAR(50) NOT NULL,
+                    fecha DATE NOT NULL,
+                    hora_inicio TIME NOT NULL,
+                    hora_fin TIME NOT NULL,
+                    estado_id INT NOT NULL,
+                    espacio_id INT NULL,
+                    creador_id INT NOT NULL,
+                    FOREIGN KEY (estado_id) REFERENCES estados(id),
+                    FOREIGN KEY (espacio_id) REFERENCES espacios(id),
+                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
+                );
+            """)
 
-# tabla de estados de los eventos
-class Estado(db.Model):
-    tablename = 'estados'
-    id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(20), unique=True, nullable=False) # 'Propuesto', 'Solicitado', 'Aprobado', 'En Revision', 'Cancelado'
-    eventos = db.relationship('Evento', backref='estado', lazy=True)
+            # ---- INSERCIÓN DE DATOS SEMILLA ----
+            # Roles por defecto
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany(
+                    "INSERT INTO roles (nombre) VALUES (%s);",
+                    [('Admin',), ('Profesor',), ('Estudiante',)]
+                )
+                # Estados por defecto
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany(
+                    "INSERT INTO estados (nombre) VALUES (%s);",
+                    [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)]
+                )
 
-# tabla de eventos
-class Evento(db.Model):
-    tablename = 'eventos'
-    id = db.Column(db.Integer, primary_key=True)
-    titulo = db.Column(db.String(150), nullable=False)
-    tipo_actividad = db.Column(db.String(50), nullable=False) # ´'congreso', 'jornada de investigacion','Conferencia', 'Taller', 'Ponencia'
-    fecha = db.Column(db.Date, nullable=False)
-    hora_inicio = db.Column(db.Time, nullable=False)
-    hora_fin = db.Column(db.Time, nullable=False)
-    estado_id = db.Column(db.Integer, db.ForeignKey('estados.id'), nullable=False)
-    espacio_id = db.Column(db.Integer, db.ForeignKey('espacios.id'), nullable=True) # Puede ser nulo si es 'Propuesto'
-    creador_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
-    descripcion = db.Column(db.String(500), nullable=False)
+            conexion.commit()
+    finally:
+        conexion.close()
 
-# ==================== INICIALIZACIÓN DE DATOS SEMILLA ====================
+# ==================== RUTA DE PRUEBA GENERAL ====================
 
-def inicializar_datos():
-    # Crear tablas si no existen
-    db.create_all()
-    
-    # Insertar Roles por defecto si la tabla está vacía
-    if not Role.query.first():
-        roles = [Role(nombre='Admin'), Role(nombre='Profesor'), Role(nombre='Estudiante')]
-        db.session.bulk_save_objects(roles)
-        
-    # Insertar Estados por defecto si la tabla está vacía
-    if not Estado.query.first():
-        estados = [Estado(nombre='Propuesto'), Estado(nombre='Solicitado'), Estado(nombre='Aprobado'),Estado(nombre='En Revision'), Estado(nombre='Cancelado')]
-        db.session.bulk_save_objects(estados)
-        
-    db.session.commit()
-
-# ==================== RUTA DE PRUEBA DE CONEXIÓN Y CREACIÓN ====================
 @app.route('/')
 def home():
     try:
-        inicializar_datos()
-        db_status = "Tablas validadas/creadas con éxito e inicializadas en Aiven MySQL"
+        inicializar_base_de_datos()
+        db_status = "¡Conexión exitosa! Tablas nativas verificadas/creadas con PyMySQL en Aiven."
     except Exception as e:
-        db_status = f"Error al interactuar con la DB: {str(e)}"
+        db_status = f"Error de conexión nativa: {str(e)}"
 
     return jsonify({
         "status": "ok",
-        "message": "Backend del Sistema de Gestión de Eventos FaCyT",
+        "message": "Backend del Sistema de Gestión de Eventos FaCyT (Modo Nativo)",
         "database_status": db_status
     })
 
-if __name__ == '__main__':
+if __name__ == 'main':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
 
