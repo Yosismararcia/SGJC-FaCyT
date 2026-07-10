@@ -1,4 +1,3 @@
-#version: 1.0 10-07 1,121
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import pymysql
@@ -8,8 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 load_dotenv()
 
 app = Flask(__name__)
-# Clave secreta para cifrar las cookies de sesión y activar mensajes flash
-app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'clave_secreta_super_segura_facyt_2026')
 
 def obtener_conexion():
     return pymysql.connect(
@@ -22,118 +20,60 @@ def obtener_conexion():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# ==================== CREACIÓN DE TABLAS E INICIALIZACIÓN NATIVA ====================
+# ==================== INICIALIZACIÓN DE LA BASE DE DATOS ====================
 
 def inicializar_base_de_datos():
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # 1. Tabla Personal Autorizado
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS personal_autorizado (
-                    cedula VARCHAR(20) PRIMARY KEY,
-                    correo_institucional VARCHAR(100) UNIQUE NOT NULL,
-                    tipo_personal VARCHAR(20) NOT NULL
-                );
-            """)
+            # Creación de tablas base
+            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
+            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
 
-            # 2. Tabla Roles
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS roles (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    nombre VARCHAR(20) UNIQUE NOT NULL
-                );
-            """)
-
-            # 3. Tabla Usuarios
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS usuarios (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    nombre_completo VARCHAR(100) NOT NULL,
-                    correo VARCHAR(100) UNIQUE NOT NULL,
-                    password_hash VARCHAR(255) NOT NULL,
-                    cedula VARCHAR(20) UNIQUE NOT NULL,
-                    role_id INT NOT NULL,
-                    FOREIGN KEY (role_id) REFERENCES roles(id)
-                );
-            """)
-
-            # 4. Tabla Espacios
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS espacios (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    nombre VARCHAR(50) UNIQUE NOT NULL,
-                    tipo VARCHAR(30) NOT NULL,
-                    capacidad INT NOT NULL,
-                    ubicacion VARCHAR(100) NOT NULL
-                );
-            """)
-
-            # 5. Tabla Estados
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS estados (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    nombre VARCHAR(20) UNIQUE NOT NULL
-                );
-            """)
-
-            # 6. Tabla Eventos
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS eventos (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    titulo VARCHAR(150) NOT NULL,
-                    tipo_actividad VARCHAR(50) NOT NULL,
-                    fecha DATE NOT NULL,
-                    hora_inicio TIME NOT NULL,
-                    hora_fin TIME NOT NULL,
-                    estado_id INT NOT NULL,
-                    espacio_id INT NULL,
-                    creador_id INT NOT NULL,
-                    FOREIGN KEY (estado_id) REFERENCES estados(id),
-                    FOREIGN KEY (espacio_id) REFERENCES espacios(id),
-                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
-                );
-            """)
-
-            # ---- INSERCIÓN DE DATOS SEMILLA ----
-            # Roles por defecto
+            # Semillas básicas
             cursor.execute("SELECT COUNT(*) AS total FROM roles;")
             if cursor.fetchone()['total'] == 0:
-                cursor.executemany(
-                    "INSERT INTO roles (nombre) VALUES (%s);",
-                    [('Admin',), ('Profesor',), ('Estudiante',)]
-                )
-                # Estados por defecto
+                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+
             cursor.execute("SELECT COUNT(*) AS total FROM estados;")
             if cursor.fetchone()['total'] == 0:
-                cursor.executemany(
-                    "INSERT INTO estados (nombre) VALUES (%s);",
-                    [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)]
-                )
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
 
-                # ---- INSERCIÓN DE DATOS SEMILLA ----
-           # Personal Autorizado de prueba (INSERT IGNORE evita duplicados si ya existen)
+            # Lista blanca de prueba
             usuarios_autorizados = [
                 ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
                 ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
                 ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
             ]
-            cursor.executemany(
-                "INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);",
-                usuarios_autorizados
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+
+            # PARCHE SEGURO: Limpiamos e insertamos al Admin de pruebas con hash fresco para asegurar login
+            cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            
+            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+            role_id = cursor.fetchone()['id']
+            
+            pass_hash = generate_password_hash('admin123')
+            cursor.execute(
+                "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);",
+                ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id)
             )
-        conexion.commit()
+
+            conexion.commit()
     finally:
         conexion.close()
-# ==================== RUTA DE PRUEBA GENERAL ====================
-# ruta del sistema 
+
+# ==================== RUTAS DEL SISTEMA ====================
+
 @app.route('/')
 def home():
-    # Inicializamos la DB al entrar a la raíz
     inicializar_base_de_datos()
-    # Si ya inició sesión, lo mandamos al dashboard (que crearemos luego)
     if 'usuario_id' in session:
-        return f"<h1>Bienvenido {session['nombre']} ({session['rol']})</h1><a href='/logout'>Cerrar Sesión</a>"
+        return f"<h1>¡Inicio de Sesión Exitoso! Bienvenido {session['nombre']} ({session['rol']})</h1><p>Próximamente Dashboard de Eventos de la FaCyT.</p><a href='/logout'>Cerrar Sesión</a>"
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -145,7 +85,6 @@ def login():
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # Consultamos al usuario junto con el nombre de su rol
                 sql = """
                     SELECT u.*, r.nombre AS rol_nombre 
                     FROM usuarios u 
@@ -156,13 +95,10 @@ def login():
                 usuario = cursor.fetchone()
 
                 if usuario and check_password_hash(usuario['password_hash'], password):
-                    # Guardamos los datos claves en la sesión de Flask
                     session['usuario_id'] = usuario['id']
                     session['nombre'] = usuario['nombre_completo']
                     session['rol'] = usuario['rol_nombre']
                     session['cedula'] = usuario['cedula']
-                    
-                    flash('¡Inicio de sesión exitoso!', 'success')
                     return redirect(url_for('home'))
                 else:
                     flash('Correo o contraseña incorrectos.', 'error')
@@ -177,8 +113,9 @@ def logout():
     flash('Sesión cerrada correctamente.', 'success')
     return redirect(url_for('login'))
 
-
-
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
 
 """
 @app.route('/')
