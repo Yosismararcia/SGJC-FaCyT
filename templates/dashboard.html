@@ -80,9 +80,9 @@
                         <h4 class="font-bold text-gray-800 text-sm mb-1">Mis Eventos</h4>
                         <p class="text-xs text-gray-500 mb-4">Consulta el estado de aprobación, ubicación y detalles de tus actividades solicitadas.</p>
                     </div>
-                    <button class="w-full bg-gray-800 text-white py-1.5 rounded text-xs font-semibold hover:bg-gray-700 transition">
+                    <a href="{{ url_for('ver_historial') }}" class="w-full bg-gray-800 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-gray-700 transition block">
                         Ver Historial
-                    </button>
+                    </a>
                 </div>
 
                 {% if session['rol'] == 'Admin' %}

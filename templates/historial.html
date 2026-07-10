@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Historial de Eventos</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Mis Actividades Propuestas</h1>
+            <p class="text-xs text-blue-200">Seguimiento y Control Institucional</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Tabla de Contenido -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        <div class="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+            <div class="p-4 border-b bg-gray-50">
+                <h3 class="font-bold text-gray-700 text-sm">Listado General de Solicitudes</h3>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-600 font-semibold uppercase text-[11px] border-b border-gray-200">
+                            <th class="p-4">Título del Evento</th>
+                            <th class="p-4">Tipo</th>
+                            <th class="p-4">Fecha</th>
+                            <th class="p-4">Horario</th>
+                            <th class="p-4">Espacio Asignado</th>
+                            <th class="p-4 text-center">Estatus</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 text-gray-700">
+                        {% if eventos %}
+                            {% for evento in eventos %}
+                            <tr class="hover:bg-gray-50/50">
+                                <td class="p-4 font-medium text-gray-900">{{ evento.titulo }}</td>
+                                <td class="p-4 text-gray-500">{{ evento.tipo_actividad }}</td>
+                                <td class="p-4 whitespace-nowrap">{{ evento.fecha }}</td>
+                                <td class="p-4 whitespace-nowrap text-xs text-gray-500">{{ evento.hora_inicio }} - {{ evento.hora_fin }}</td>
+                                <td class="p-4 italic text-gray-500">
+                                    {{ evento.espacio_nombre if evento.espacio_nombre else 'Por asignar (En revisión)' }}
+                                </td>
+                                <td class="p-4 text-center whitespace-nowrap">
+                                    <span class="inline-block text-[11px] font-bold px-2.5 py-1 rounded-full border
+                                        {% if evento.estado_nombre == 'Propuesto' %} bg-amber-50 text-amber-700 border-amber-200
+                                        {% elif evento.estado_nombre == 'Aprobado' %} bg-green-50 text-green-700 border-green-200
+                                        {% else %} bg-red-50 text-red-700 border-red-200 {% endif %}">
+                                        {{ evento.estado_nombre }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="p-8 text-center text-gray-400 italic">
+                                    No has registrado ninguna propuesta de actividad todavía.
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>

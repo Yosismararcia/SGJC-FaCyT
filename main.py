@@ -172,6 +172,40 @@ def proponer_evento():
         return render_template('proponer.html')
     return redirect(url_for('login'))
 
+@app.route('/historial')
+def ver_historial():
+    if 'usuario_id' in session:
+        creador_id = session['usuario_id']
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                # Consulta relacional con JOINs para traer los nombres del estado y del espacio
+                sql = """
+                    SELECT e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    LEFT JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE e.creador_id = %s
+                    ORDER BY e.fecha DESC, e.hora_inicio DESC;
+                """
+                cursor.execute(sql, (creador_id,))
+                eventos = cursor.fetchall()
+                
+                # Conversión opcional de tiempos/fechas a string si es necesario para evitar problemas de tipos en Jinja2
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])
+                    ev['hora_fin'] = str(ev['hora_fin'])
+        except Exception as e:
+            flash(f'Error al cargar el historial: {str(e)}', 'error')
+        finally:
+            conexion.close()
+
+        return render_template('historial.html', eventos=eventos)
+    return redirect(url_for('login'))
+
 @app.route('/logout')
 def logout():
     session.clear()
