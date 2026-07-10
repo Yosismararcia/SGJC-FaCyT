@@ -1,0 +1,1096 @@
+#version: 1.0 10-07 1,121
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pymysql
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
+
+app = Flask(__name__)
+# Clave secreta para cifrar las cookies de sesión y activar mensajes flash
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
+
+def obtener_conexion():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        database=os.getenv('DB_NAME', 'defaultdb'),
+        ssl_verify_identity=False,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+# ==================== CREACIÓN DE TABLAS E INICIALIZACIÓN NATIVA ====================
+
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # 1. Tabla Personal Autorizado
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS personal_autorizado (
+                    cedula VARCHAR(20) PRIMARY KEY,
+                    correo_institucional VARCHAR(100) UNIQUE NOT NULL,
+                    tipo_personal VARCHAR(20) NOT NULL
+                );
+            """)
+
+            # 2. Tabla Roles
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS roles (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
+
+            # 3. Tabla Usuarios
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre_completo VARCHAR(100) NOT NULL,
+                    correo VARCHAR(100) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    cedula VARCHAR(20) UNIQUE NOT NULL,
+                    role_id INT NOT NULL,
+                    FOREIGN KEY (role_id) REFERENCES roles(id)
+                );
+            """)
+
+            # 4. Tabla Espacios
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS espacios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(50) UNIQUE NOT NULL,
+                    tipo VARCHAR(30) NOT NULL,
+                    capacidad INT NOT NULL,
+                    ubicacion VARCHAR(100) NOT NULL
+                );
+            """)
+
+            # 5. Tabla Estados
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS estados (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
+
+            # 6. Tabla Eventos
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eventos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    titulo VARCHAR(150) NOT NULL,
+                    tipo_actividad VARCHAR(50) NOT NULL,
+                    fecha DATE NOT NULL,
+                    hora_inicio TIME NOT NULL,
+                    hora_fin TIME NOT NULL,
+                    estado_id INT NOT NULL,
+                    espacio_id INT NULL,
+                    creador_id INT NOT NULL,
+                    FOREIGN KEY (estado_id) REFERENCES estados(id),
+                    FOREIGN KEY (espacio_id) REFERENCES espacios(id),
+                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
+                );
+            """)
+
+            # ---- INSERCIÓN DE DATOS SEMILLA ----
+            # Roles por defecto
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany(
+                    "INSERT INTO roles (nombre) VALUES (%s);",
+                    [('Admin',), ('Profesor',), ('Estudiante',)]
+                )
+                # Estados por defecto
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany(
+                    "INSERT INTO estados (nombre) VALUES (%s);",
+                    [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)]
+                )
+
+                # ---- INSERCIÓN DE DATOS SEMILLA ----
+           # Personal Autorizado de prueba (INSERT IGNORE evita duplicados si ya existen)
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany(
+                "INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);",
+                usuarios_autorizados
+            )
+        conexion.commit()
+    finally:
+        conexion.close()
+# ==================== RUTA DE PRUEBA GENERAL ====================
+# ruta del sistema 
+@app.route('/')
+def home():
+    # Inicializamos la DB al entrar a la raíz
+    inicializar_base_de_datos()
+    # Si ya inició sesión, lo mandamos al dashboard (que crearemos luego)
+    if 'usuario_id' in session:
+        return f"<h1>Bienvenido {session['nombre']} ({session['rol']})</h1><a href='/logout'>Cerrar Sesión</a>"
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        correo = request.form['correo']
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # Consultamos al usuario junto con el nombre de su rol
+                sql = """
+                    SELECT u.*, r.nombre AS rol_nombre 
+                    FROM usuarios u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.correo = %s;
+                """
+                cursor.execute(sql, (correo,))
+                usuario = cursor.fetchone()
+
+                if usuario and check_password_hash(usuario['password_hash'], password):
+                    # Guardamos los datos claves en la sesión de Flask
+                    session['usuario_id'] = usuario['id']
+                    session['nombre'] = usuario['nombre_completo']
+                    session['rol'] = usuario['rol_nombre']
+                    session['cedula'] = usuario['cedula']
+                    
+                    flash('¡Inicio de sesión exitoso!', 'success')
+                    return redirect(url_for('home'))
+                else:
+                    flash('Correo o contraseña incorrectos.', 'error')
+        finally:
+            conexion.close()
+
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'success')
+    return redirect(url_for('login'))
+
+
+<!-- primera modificacion-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Panel Principal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- Barra de Navegación Superior -->
+    <nav class="bg-blue-900 text-white shadow-md px-6 py-4 flex justify-between items-center">
+        <div>
+            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
+            <p class="text-xs text-blue-200">Sistema de Gestión de Eventos</p>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="text-right">
+                <p class="text-sm font-semibold">{{ session['nombre'] }}</p>
+                <span class="inline-block bg-blue-800 text-xs px-2 py-0.5 rounded-full border border-blue-600 font-medium text-blue-200">
+                    {{ session['rol'] }}
+                </span>
+            </div>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition">
+                Cerrar Sesión
+            </a>
+        </div>
+    </nav>
+
+ <!-- Mensajes Flash globales en el Dashboard -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="max-w-7xl w-full mx-auto px-6 mt-4">
+                {% for category, message in messages %}
+                    <div class="p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-7xl w-full mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- Columna de Información del Usuario -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div>
+                <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Datos de Usuario</h3>
+                <div class="space-y-2 text-sm text-gray-600">
+                    <p><span class="font-semibold text-gray-700">Cédula:</span> {{ session['cedula'] }}</p>
+                    <p><span class="font-semibold text-gray-700">Facultad:</span> Ciencias y Tecnología (FaCyT)</p>
+                    <p><span class="font-semibold text-gray-700">Institución:</span> Universidad de Carabobo</p>
+                </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-gray-100 text-xs text-gray-400 text-center">
+                Conexión segura cifrada con SSL
+            </div>
+        </div>
+
+        <!-- Columna de Acciones Dinámicas (Depende del Rol) -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 md:col-span-2">
+            <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Acciones Disponibles</h3>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                <!-- Acciones para todos los usuarios (Profesores, Estudiantes, Admins) -->
+                <div class="p-4 border border-blue-100 bg-blue-50/50 rounded-lg flex flex-col justify-between">
+                    <div>
+                        <h4 class="font-bold text-blue-900 text-sm mb-1">Proponer Actividad</h4>
+                        <p class="text-xs text-gray-500 mb-4">Solicita el espacio y registra una propuesta para conferencias, ponencias o talleres.</p>
+                    </div>
+                    <button class="w-full bg-blue-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-blue-800 transition">
+                        Crear Solicitud
+                    </button>
+                </div>
+
+                <div class="p-4 border border-gray-200 rounded-lg flex flex-col justify-between">
+                    <div>
+                        <h4 class="font-bold text-gray-800 text-sm mb-1">Mis Eventos</h4>
+                        <p class="text-xs text-gray-500 mb-4">Consulta el estado de aprobación, ubicación y detalles de tus actividades solicitadas.</p>
+                    </div>
+                    <button class="w-full bg-gray-800 text-white py-1.5 rounded text-xs font-semibold hover:bg-gray-700 transition">
+                        Ver Historial
+                    </button>
+                </div>
+                
+                {% if session['rol'] == 'Admin' %}
+                <div class="p-4 border border-purple-100 bg-purple-50/50 rounded-lg flex flex-col justify-between sm:col-span-2">
+                    <div>
+                        <span class="inline-block bg-purple-200 text-purple-800 font-bold text-[10px] px-2 py-0.5 rounded mb-2 uppercase tracking-wide">
+                            Panel de Control Administrativo
+                        </span>
+                        <h4 class="font-bold text-purple-900 text-sm mb-1">Gestión Centralizada</h4>
+                        <p class="text-xs text-gray-500 mb-4">Evalúa solicitudes de eventos pendientes, administra laboratorios/auditorios y realiza cargas de listas blancas masivas.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button class="bg-purple-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition">
+                            Revisar Solicitudes Pendientes
+                        </button>
+                        <button class="border border-purple-900 text-purple-900 py-1.5 rounded text-xs font-semibold hover:bg-purple-50 transition">
+                            Cargar Personal Autorizado
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+
+ <!--   modificacion            
+                {% if session['rol'] == 'Admin' %}
+                <div class="p-4 border border-purple-100 bg-purple-50/50 rounded-lg flex flex-col justify-between sm:col-span-2">
+                    <div>
+                        <span class="inline-block bg-purple-200 text-purple-800 font-bold text-[10px] px-2 py-0.5 rounded mb-2 uppercase tracking-wide">
+                            Panel de Control Administrativo
+                        </span>
+                        <h4 class="font-bold text-purple-900 text-sm mb-1">Gestión Centralizada</h4>
+                        <p class="text-xs text-gray-500 mb-4">Evalúa solicitudes de eventos pendientes, administra laboratorios/auditorios y realiza cargas de listas blancas masivas.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button class="bg-purple-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition">
+                            Revisar Solicitudes Pendientes
+                        </button>
+                        <button class="border border-purple-900 text-purple-900 py-1.5 rounded text-xs font-semibold hover:bg-purple-50 transition">
+                            Cargar Personal Autorizado
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+-->
+    </main>
+
+    <!-- Pie de página -->
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs border-t border-gray-700">
+        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+
+
+
+
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pymysql
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'clave_secreta_super_segura_facyt_2026')
+
+def obtener_conexion():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        database=os.getenv('DB_NAME', 'defaultdb'),
+        ssl_verify_identity=False,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+# ==================== INICIALIZACIÓN DE LA BASE DE DATOS ====================
+
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # Creación de tablas base
+            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
+            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
+
+            # Semillas básicas
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
+
+            # Lista blanca de prueba
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+
+            # PARCHE SEGURO: Limpiamos e insertamos al Admin de pruebas con hash fresco para asegurar login
+            cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            
+            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+            role_id = cursor.fetchone()['id']
+            
+            pass_hash = generate_password_hash('admin123')
+            cursor.execute(
+                "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);",
+                ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id)
+            )
+
+            conexion.commit()
+    finally:
+        conexion.close()
+
+# ==================== RUTAS DEL SISTEMA ====================
+#ruta principal del sistema
+""" modificado por el siguiente codigo para dasboard de eventos
+@app.route('/')
+def home():
+    inicializar_base_de_datos()
+    if 'usuario_id' in session:
+        return f"<h1>¡Inicio de Sesión Exitoso! Bienvenido {session['nombre']} ({session['rol']})</h1><p>Próximamente Dashboard de Eventos de la FaCyT.</p><a href='/logout'>Cerrar Sesión</a>"
+    return redirect(url_for('login'))
+"""
+@app.route('/')
+def home():
+    inicializar_base_de_datos()
+    if 'usuario_id' in session:
+        # Renderizamos la plantilla limpia pasándole el contexto de la sesión
+        return render_template('dashboard.html')
+    return redirect(url_for('login'))
+
+#ruta para el login de los usuarios
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        correo = request.form['correo']
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT u.*, r.nombre AS rol_nombre 
+                    FROM usuarios u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.correo = %s;
+                """
+                cursor.execute(sql, (correo,))
+                usuario = cursor.fetchone()
+
+                if usuario and check_password_hash(usuario['password_hash'], password):
+                    session['usuario_id'] = usuario['id']
+                    session['nombre'] = usuario['nombre_completo']
+                    session['rol'] = usuario['rol_nombre']
+                    session['cedula'] = usuario['cedula']
+                    return redirect(url_for('home'))
+                else:
+                    flash('Correo o contraseña incorrectos.', 'error')
+        finally:
+            conexion.close()
+
+    return render_template('login.html')
+
+#ruta para los registros de los usuarios
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        cedula = request.form['cedula'].strip()
+        nombre = request.form['nombre'].strip()
+        correo = request.form['correo'].strip()
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # 1. VALIDACIÓN CONTRA LA LISTA BLANCA DE LA UNIVERSIDAD
+                cursor.execute(
+                    "SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", 
+                    (cedula, correo)
+                )
+                personal = cursor.fetchone()
+
+                if not personal:
+                    flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
+                    return redirect(url_for('register'))
+
+                # 2. VERIFICAR SI YA SE HABÍA REGISTRADO ANTES
+                cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
+                if cursor.fetchone():
+                    flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
+                    return redirect(url_for('register'))
+
+                # 3. IDENTIFICAR EL ID DEL ROL CORRESPONDIENTE
+                cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
+                role_id = cursor.fetchone()['id']
+
+                # 4. ENCRIPTAR CONTRASEÑA E INSERTAR EN USUARIOS DEFINITIVOS
+                password_hash = generate_password_hash(password)
+                sql_insert = """
+                    INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) 
+                    VALUES (%s, %s, %s, %s, %s);
+                """
+                cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
+                conexion.commit()
+
+                flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
+                return redirect(url_for('login'))
+        finally:
+            conexion.close()
+
+    return render_template('register.html')
+
+#ruta para las propuestas de actividades
+@app.route('/proponer', methods=['GET', 'POST'])
+def proponer_evento():
+    # Protección de ruta: si no está logueado, va al login
+    if 'usuario_id' in session:
+        if request.method == 'POST':
+            titulo = request.form['titulo'].strip()
+            tipo_actividad = request.form['tipo_actividad']
+            fecha = request.form['fecha']
+            hora_inicio = request.form['hora_inicio']
+            hora_fin = request.form['hora_fin']
+            creador_id = session['usuario_id']
+
+            # Validación básica de tiempos lógicos
+            if hora_inicio >= hora_fin:
+                flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
+                return render_template('proponer.html')
+
+            conexion = obtener_conexion()
+            try:
+                with conexion.cursor() as cursor:
+                    # Buscamos el ID asignado al estado por defecto 'Propuesto'
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
+                    estado_id = cursor.fetchone()['id']
+
+                    # Insertamos el evento ligando la propuesta al usuario actual
+                    sql_evento = """
+                        INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """
+                    cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id))
+                    conexion.commit()
+                    
+                flash('¡Propuesta enviada con éxito! Está en revisión administrativa.', 'success')
+                return redirect(url_for('home'))
+            except Exception as e:
+                flash(f'Error en el sistema al guardar la actividad: {str(e)}', 'error')
+            finally:
+                conexion.close()
+
+        return render_template('proponer.html')
+    return redirect(url_for('login'))
+
+#ruta para cerrar sesion
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'success')
+    return redirect(url_for('login'))
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+"""
+"""
+@app.route('/')
+def home():
+    try:
+        inicializar_base_de_datos()
+        db_status = "¡Conexión exitosa! Tablas nativas verificadas/creadas con PyMySQL en Aiven."
+    except Exception as e:
+        db_status = f"Error de conexión nativa: {str(e)}"
+
+    return jsonify({
+        "status": "ok",
+        "message": "Backend del Sistema de Gestión de Eventos FaCyT (Modo Nativo)",
+        "database_status": db_status
+    })
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+"""
+
+
+
+se cambio para poder editar los eventos spolicitados en el historiañ
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Historial de Eventos</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Mis Actividades Propuestas</h1>
+            <p class="text-xs text-blue-200">Seguimiento y Control Institucional</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Tabla de Contenido -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        <div class="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+            <div class="p-4 border-b bg-gray-50">
+                <h3 class="font-bold text-gray-700 text-sm">Listado General de Solicitudes</h3>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-600 font-semibold uppercase text-[11px] border-b border-gray-200">
+                            <th class="p-4">Título del Evento</th>
+                            <th class="p-4">Tipo</th>
+                            <th class="p-4">Fecha</th>
+                            <th class="p-4">Horario</th>
+                            <th class="p-4">Espacio Asignado</th>
+                            <th class="p-4 text-center">Estatus</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 text-gray-700">
+                        {% if eventos %}
+                            {% for evento in eventos %}
+                            <tr class="hover:bg-gray-50/50">
+                                <td class="p-4 font-medium text-gray-900">{{ evento.titulo }}</td>
+                                <td class="p-4 text-gray-500">{{ evento.tipo_actividad }}</td>
+                                <td class="p-4 whitespace-nowrap">{{ evento.fecha }}</td>
+                                <td class="p-4 whitespace-nowrap text-xs text-gray-500">{{ evento.hora_inicio }} - {{ evento.hora_fin }}</td>
+                                <td class="p-4 italic text-gray-500">
+                                    {{ evento.espacio_nombre if evento.espacio_nombre else 'Por asignar (En revisión)' }}
+                                </td>
+                                <td class="p-4 text-center whitespace-nowrap">
+                                    <span class="inline-block text-[11px] font-bold px-2.5 py-1 rounded-full border
+                                        {% if evento.estado_nombre == 'Propuesto' %} bg-amber-50 text-amber-700 border-amber-200
+                                        {% elif evento.estado_nombre == 'Aprobado' %} bg-green-50 text-green-700 border-green-200
+                                        {% else %} bg-red-50 text-red-700 border-red-200 {% endif %}">
+                                        {{ evento.estado_nombre }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="p-8 text-center text-gray-400 italic">
+                                    No has registrado ninguna propuesta de actividad todavía.
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+noche
+#MODIFICADO PORQUE NO ME DEJABA DARLE CLICK AL BOTON DE CREAER EVENTO
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pymysql
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'clave_secreta_super_segura_facyt_2026')
+
+def obtener_conexion():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        database=os.getenv('DB_NAME', 'defaultdb'),
+        ssl_verify_identity=False,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
+            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
+
+            if cursor.execute("SELECT COUNT(*) AS total FROM roles;") and cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+
+            if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
+
+# Precarga de Espacios Físicos de la FaCyT si la tabla está vacía
+            if cursor.execute("SELECT COUNT(*) AS total FROM espacios;") and cursor.fetchone()['total'] == 0:
+                espacios_facyt = [
+                    ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
+                    ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
+                    ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
+                ]
+                cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+            
+# ---------------CORRECCIÓN DE RAÍZ: Insertar solo si NO existe para mantener estable el ID autoincremental
+            cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            if not cursor.fetchone():
+                cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+                role_id = cursor.fetchone()['id']
+                pass_hash = generate_password_hash('admin123')
+                cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            
+            conexion.commit()
+            """
+            cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+            role_id = cursor.fetchone()['id']
+            pass_hash = generate_password_hash('admin123')
+            cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            conexion.commit()"""
+    finally:
+        conexion.close()
+
+@app.route('/')
+def home():
+    inicializar_base_de_datos()
+    if 'usuario_id' in session:
+        return render_template('dashboard.html')
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        correo = request.form['correo']
+        password = request.form['password']
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                sql = "SELECT u.*, r.nombre AS rol_nombre FROM usuarios u JOIN roles r ON u.role_id = r.id WHERE u.correo = %s;"
+                cursor.execute(sql, (correo,))
+                usuario = cursor.fetchone()
+                if usuario and check_password_hash(usuario['password_hash'], password):
+                    session['usuario_id'] = usuario['id']
+                    session['nombre'] = usuario['nombre_completo']
+                    session['rol'] = usuario['rol_nombre']
+                    session['cedula'] = usuario['cedula']
+                    return redirect(url_for('home'))
+                else:
+                    flash('Correo o contraseña incorrectos.', 'error')
+        finally:
+            conexion.close()
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        cedula = request.form['cedula'].strip()
+        nombre = request.form['nombre'].strip()
+        correo = request.form['correo'].strip()
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", (cedula, correo))
+                personal = cursor.fetchone()
+
+                if not personal:
+                    flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
+                    return redirect(url_for('register'))
+
+                cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
+                if cursor.fetchone():
+                    flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
+                    return redirect(url_for('register'))
+
+                cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
+                role_id = cursor.fetchone()['id']
+
+                password_hash = generate_password_hash(password)
+                sql_insert = "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);"
+                cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
+                conexion.commit()
+
+                flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
+                return redirect(url_for('login'))
+        finally:
+            conexion.close()
+    return render_template('register.html')
+
+@app.route('/proponer', methods=['GET', 'POST'])
+def proponer_evento():
+    # Protección de ruta: si no está logueado, va al login
+    if 'usuario_id' in session:
+        if request.method == 'POST':
+            titulo = request.form['titulo'].strip()
+            tipo_actividad = request.form['tipo_actividad']
+            fecha = request.form['fecha']
+            hora_inicio = request.form['hora_inicio']
+            hora_fin = request.form['hora_fin']
+            creador_id = session['usuario_id']
+
+            # Validación básica de tiempos lógicos
+            if hora_inicio >= hora_fin:
+                flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
+                return render_template('proponer.html')
+
+            conexion = obtener_conexion()
+            try:
+                with conexion.cursor() as cursor:
+                    # Buscamos el ID asignado al estado por defecto 'Propuesto'
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
+                    estado_id = cursor.fetchone()['id']
+                    # Insertamos el evento ligando la propuesta al usuario actual
+                    sql_evento = """
+                        INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """
+                    cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id))
+                    conexion.commit()
+                    
+                flash('¡Propuesta enviada con éxito! Está en revisión administrativa.', 'success')
+                return redirect(url_for('home'))
+            except Exception as e:
+                flash(f'Error en el sistema al guardar la actividad: {str(e)}', 'error')
+            finally:
+                conexion.close()
+
+        return render_template('proponer.html')
+    return redirect(url_for('login'))
+
+@app.route('/historial')
+def ver_historial():
+    if 'usuario_id' in session:
+        creador_id = session['usuario_id']
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                # Consulta relacional con JOINs para traer los nombres del estado y del espacio
+                sql = """
+                    SELECT e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    LEFT JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE e.creador_id = %s
+                    ORDER BY e.fecha DESC, e.hora_inicio DESC;
+                """
+                cursor.execute(sql, (creador_id,))
+                eventos = cursor.fetchall()
+                
+                # Conversión opcional de tiempos/fechas a string si es necesario para evitar problemas de tipos en Jinja2
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])
+                    ev['hora_fin'] = str(ev['hora_fin'])
+        except Exception as e:
+            flash(f'Error al cargar el historial: {str(e)}', 'error')
+        finally:
+            conexion.close()
+
+        return render_template('historial.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+#----------- NUEVA MODIFICACION AGREGADA DE LOS ADMIN PENDIENTES
+@app.route('/admin/pendientes')
+def admin_pendientes():
+    # Seguridad: Solo los Admin pueden entrar aquí
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        conexion = obtener_conexion()
+        solicitudes = []
+        espacios = []
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Buscar eventos con estatus 'Propuesto'
+                sql_solicitudes = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           u.nombre_completo AS solicitante, u.cedula
+                    FROM eventos e
+                    JOIN usuarios u ON e.creador_id = u.id
+                    JOIN estados est ON e.estado_id = est.id
+                    WHERE est.nombre = 'Propuesto'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql_solicitudes)
+                solicitudes = cursor.fetchall()
+                for s in solicitudes:
+                    s['fecha'] = str(s['fecha'])
+                    s['hora_inicio'] = str(s['hora_inicio'])
+                    s['hora_fin'] = str(s['hora_fin'])
+
+                # 2. Buscar espacios físicos disponibles para llenar el menú desplegable
+                cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
+                espacios = cursor.fetchall()
+        finally:
+            conexion.close()
+        return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
+    return redirect(url_for('login'))
+
+@app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
+def procesar_solicitud(evento_id):
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        accion = request.form.get('accion')
+        espacio_id = request.form.get('espacio_id')
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                if accion == 'aprobar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
+                    estado_id = cursor.fetchone()['id']
+                    # Se actualiza el evento con el espacio seleccionado y el nuevo estatus
+                    cursor.execute(
+                        "UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;", 
+                        (estado_id, espacio_id, evento_id)
+                    )
+                    flash('Evento aprobado correctamente con espacio asignado.', 'success')
+                elif accion == 'cancelar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
+                    estado_id = cursor.fetchone()['id']
+                    cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
+                    flash('Propuesta rechazada y cancelada con éxito.', 'success')
+                conexion.commit()
+        finally:
+            conexion.close()
+        return redirect(url_for('admin_pendientes'))
+    return redirect(url_for('login'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'success')
+    return redirect(url_for('login'))
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""from flask import Flask, jsonify
+from flask_sqlalchemy import SQLAlchemy
+import os
+
+app = Flask(__name__)
+
+# 1. Recuperamos las variables que configuraste en Render (u tu .env local)
+DB_USER = os.environ.get("DB_USER")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
+DB_HOST = os.environ.get("DB_HOST")
+DB_PORT = os.environ.get("DB_PORT", "3306")
+DB_NAME = os.environ.get("DB_NAME", "defaultdb")
+
+# 2. Armamos la URL de conexión adaptada para Aiven MySQL utilizando SSL nativo
+# Usamos ssl_verify_cert=True y el llavero de certificados por defecto de Linux (/etc/ssl/certs/ca-certificates.crt)
+DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl_ca=/etc/ssl/certs/ca-certificates.crt"
+
+app.config['SQLALCHEMY_DATABASE_URL'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+@app.route('/')
+def home():
+    try:
+        # Hacemos una consulta rápida de prueba a la base de datos para verificar conexión
+        db.session.execute('SELECT 1')
+        db_status = "Conexión exitosa a Aiven MySQL"
+    except Exception as e:
+        db_status = f"Error de conexión: {str(e)}"
+
+    return jsonify({
+        "status": "ok",
+        "message": "Backend corriendo en Render con Flask",
+        "database_status": db_status
+    })
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
+
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""from flask import Flask, jsonify
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "ok",
+        "message": "Backend corriendo en Render con Flask con éxito"
+    })
+
+if __name__ == '__main__':
+    # Esto es solo para correrlo local en WSL2
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
+"""
