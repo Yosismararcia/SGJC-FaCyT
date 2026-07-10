@@ -1,8 +1,7 @@
-cat <<EOF > main.py
 from flask import Flask, jsonify
 import os
 
-app = Flask(name)
+app = Flask(__name__)
 
 @app.route('/')
 def home():
@@ -11,8 +10,7 @@ def home():
         "message": "Backend corriendo en Render con Flask con éxito"
     })
 
-if name == 'main':
+if __name__ == '__main__':
     # Esto es solo para correrlo local en WSL2
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-EOF
