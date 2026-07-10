@@ -68,14 +68,24 @@ def inicializar_base_de_datos():
         conexion.close()
 
 # ==================== RUTAS DEL SISTEMA ====================
-
+#ruta principal del sistema
+""" modificado por el siguiente codigo para dasboard de eventos
 @app.route('/')
 def home():
     inicializar_base_de_datos()
     if 'usuario_id' in session:
         return f"<h1>¡Inicio de Sesión Exitoso! Bienvenido {session['nombre']} ({session['rol']})</h1><p>Próximamente Dashboard de Eventos de la FaCyT.</p><a href='/logout'>Cerrar Sesión</a>"
     return redirect(url_for('login'))
+"""
+@app.route('/')
+def home():
+    inicializar_base_de_datos()
+    if 'usuario_id' in session:
+        # Renderizamos la plantilla limpia pasándole el contexto de la sesión
+        return render_template('dashboard.html')
+    return redirect(url_for('login'))
 
+#ruta para el login de los usuarios
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -107,6 +117,99 @@ def login():
 
     return render_template('login.html')
 
+#ruta para los registros de los usuarios
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        cedula = request.form['cedula'].strip()
+        nombre = request.form['nombre'].strip()
+        correo = request.form['correo'].strip()
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # 1. VALIDACIÓN CONTRA LA LISTA BLANCA DE LA UNIVERSIDAD
+                cursor.execute(
+                    "SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", 
+                    (cedula, correo)
+                )
+                personal = cursor.fetchone()
+
+                if not personal:
+                    flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
+                    return redirect(url_for('register'))
+
+                # 2. VERIFICAR SI YA SE HABÍA REGISTRADO ANTES
+                cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
+                if cursor.fetchone():
+                    flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
+                    return redirect(url_for('register'))
+
+                # 3. IDENTIFICAR EL ID DEL ROL CORRESPONDIENTE
+                cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
+                role_id = cursor.fetchone()['id']
+
+                # 4. ENCRIPTAR CONTRASEÑA E INSERTAR EN USUARIOS DEFINITIVOS
+                password_hash = generate_password_hash(password)
+                sql_insert = """
+                    INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) 
+                    VALUES (%s, %s, %s, %s, %s);
+                """
+                cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
+                conexion.commit()
+
+                flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
+                return redirect(url_for('login'))
+        finally:
+            conexion.close()
+
+    return render_template('register.html')
+
+#ruta para las propuestas de actividades
+@app.route('/proponer', methods=['GET', 'POST'])
+def proponer_evento():
+    # Protección de ruta: si no está logueado, va al login
+    if 'usuario_id' in session:
+        if request.method == 'POST':
+            titulo = request.form['titulo'].strip()
+            tipo_actividad = request.form['tipo_actividad']
+            fecha = request.form['fecha']
+            hora_inicio = request.form['hora_inicio']
+            hora_fin = request.form['hora_fin']
+            creador_id = session['usuario_id']
+
+            # Validación básica de tiempos lógicos
+            if hora_inicio >= hora_fin:
+                flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
+                return render_template('proponer.html')
+
+            conexion = obtener_conexion()
+            try:
+                with conexion.cursor() as cursor:
+                    # Buscamos el ID asignado al estado por defecto 'Propuesto'
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
+                    estado_id = cursor.fetchone()['id']
+
+                    # Insertamos el evento ligando la propuesta al usuario actual
+                    sql_evento = """
+                        INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """
+                    cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id))
+                    conexion.commit()
+                    
+                flash('¡Propuesta enviada con éxito! Está en revisión administrativa.', 'success')
+                return redirect(url_for('home'))
+            except Exception as e:
+                flash(f'Error en el sistema al guardar la actividad: {str(e)}', 'error')
+            finally:
+                conexion.close()
+
+        return render_template('proponer.html')
+    return redirect(url_for('login'))
+
+#ruta para cerrar sesion
 @app.route('/logout')
 def logout():
     session.clear()

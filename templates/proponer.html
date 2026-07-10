@@ -1,0 +1,101 @@
+<!-- primera version de la plantilla para proponer actividades -->
+ <!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Proponer Actividad</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar simplificado -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Proponer Nueva Actividad</h1>
+            <p class="text-xs text-blue-200">FaCyT - Jornadas y Congresos</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Contenedor del Formulario -->
+    <main class="flex-grow p-6 flex items-center justify-center">
+        <div class="bg-white p-8 rounded-lg shadow-md w-full max-w-2xl border border-gray-200">
+            
+            <!-- Alertas Flash específicas del formulario -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="mb-4 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form action="{{ url_for('proponer_evento') }}" method="POST" class="space-y-6">
+                
+                <div>
+                    <label class="block text-gray-700 font-semibold mb-1 text-sm">Título de la Actividad</label>
+                    <input type="text" name="titulo" required placeholder="Ej: Simposio de Inteligencia Artificial Aplicada"
+                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-1 text-sm">Tipo de Actividad</label>
+                        <select name="tipo_actividad" required 
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+                            <option value="" disabled selected>Seleccione una opción</option>
+                            <option value="Conferencia">Conferencia</option>
+                            <option value="Taller">Taller / Workshop</option>
+                            <option value="Ponencia">Ponencia</option>
+                            <option value="Congreso">Congreso Institucional</option>
+                            <option value="Seminario">Seminario</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-1 text-sm">Fecha Propuesta</label>
+                        <input type="date" name="fecha" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-1 text-sm">Hora de Inicio</label>
+                        <input type="time" name="hora_inicio" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-1 text-sm">Hora de Culminación</label>
+                        <input type="time" name="hora_fin" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded text-xs">
+                    💡 <strong>Nota:</strong> Al enviar la propuesta, el evento quedará guardado automáticamente con estatus de <strong>"Propuesto"</strong> en espera de la asignación de un aula/auditorio disponible por parte del Administrador.
+                </div>
+
+                <div class="flex space-x-3 justify-end">
+                    <a href="{{ url_for('home') }}" class="px-4 py-2 border border-gray-300 text-gray-700 rounded text-sm hover:bg-gray-50 transition">
+                        Cancelar
+                    </a>
+                    <button type="submit" class="px-5 py-2 bg-blue-900 text-white rounded font-semibold text-sm hover:bg-blue-800 transition">
+                        Enviar Propuesta
+                    </button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
