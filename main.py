@@ -44,13 +44,23 @@ def inicializar_base_de_datos():
                 ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
             ]
             cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
-
+            
+# ---------------CORRECCIÓN DE RAÍZ: Insertar solo si NO existe para mantener estable el ID autoincremental
+            cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            if not cursor.fetchone():
+                cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+                role_id = cursor.fetchone()['id']
+                pass_hash = generate_password_hash('admin123')
+                cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            
+            conexion.commit()
+            """
             cursor.execute("DELETE FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
             cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
             role_id = cursor.fetchone()['id']
             pass_hash = generate_password_hash('admin123')
             cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
-            conexion.commit()
+            conexion.commit()"""
     finally:
         conexion.close()
 
