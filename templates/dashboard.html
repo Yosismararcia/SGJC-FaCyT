@@ -95,9 +95,9 @@
                         <p class="text-xs text-gray-500 mb-4">Evalúa solicitudes de eventos pendientes, administra laboratorios/auditorios y realiza cargas de listas blancas masivas.</p>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <button class="bg-purple-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition">
+                        <a href="{{ url_for('admin_pendientes') }}" class="bg-purple-900 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition block">
                             Revisar Solicitudes Pendientes
-                        </button>
+                        </a>
                         <button class="border border-purple-900 text-purple-900 py-1.5 rounded text-xs font-semibold hover:bg-purple-50 transition">
                             Cargar Personal Autorizado
                         </button>

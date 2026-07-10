@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Solicitudes Pendientes</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-purple-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Panel de Aprobaciones</h1>
+            <p class="text-xs text-purple-200">Revisión de propuestas de eventos de la FaCyT</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-purple-800 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Contenido -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-4 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+            <div class="p-4 bg-gray-50 border-b">
+                <h3 class="font-bold text-gray-700 text-sm">Cola de Actividades en Espera</h3>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-600 font-semibold uppercase text-[11px] border-b border-gray-200">
+                            <th class="p-4">Título / Solicitante</th>
+                            <th class="p-4">Tipo</th>
+                            <th class="p-4">Fecha y Horario</th>
+                            <th class="p-4">Asignar Espacio Físico</th>
+                            <th class="p-4 text-center">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        {% if solicitudes %}
+                            {% for sol in solicitudes %}
+                            <tr class="hover:bg-gray-50/50">
+                                <td class="p-4">
+                                    <div class="font-semibold text-gray-900">{{ sol.titulo }}</div>
+                                    <div class="text-xs text-gray-400">Por: {{ sol.solicitante }} (C.I: {{ sol.cedula }})</div>
+                                </td>
+                                <td class="p-4 text-gray-500 whitespace-nowrap">{{ sol.tipo_actividad }}</td>
+                                <td class="p-4 text-xs text-gray-600">
+                                    <div class="font-medium">{{ sol.fecha }}</div>
+                                    <div>{{ sol.hora_inicio }} - {{ sol.hora_fin }}</div>
+                                </td>
+                                <form action="{{ url_for('procesar_solicitud', evento_id=sol.id) }}" method="POST">
+                                    <td class="p-4">
+                                        <select name="espacio_id" required class="px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-full max-w-xs">
+                                            <option value="" disabled selected>-- Elegir Aula/Auditorio --</option>
+                                            {% for esp in espacios %}
+                                                <option value="{{ esp.id }}">{{ esp.nombre }} (Cap: {{ esp.capacidad }})</option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td class="p-4 text-center whitespace-nowrap space-x-1">
+                                        <button type="submit" name="accion" value="aprobar" class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded text-xs font-semibold transition">
+                                            Aprobar
+                                        </button>
+                                        <button type="submit" name="accion" value="cancelar" class="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs font-semibold transition" onclick="return confirm('¿Seguro que deseas rechazar esta propuesta?');">
+                                            Rechazar
+                                        </button>
+                                    </td>
+                                </form>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="p-8 text-center text-gray-400 italic bg-gray-50/30">
+                                    No hay solicitudes de eventos pendientes por procesar.
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>

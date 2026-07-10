@@ -38,6 +38,15 @@ def inicializar_base_de_datos():
             if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
 
+# Precarga de Espacios Físicos de la FaCyT si la tabla está vacía
+            if cursor.execute("SELECT COUNT(*) AS total FROM espacios;") and cursor.fetchone()['total'] == 0:
+                espacios_facyt = [
+                    ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
+                    ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
+                    ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
+                ]
+                cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+
             usuarios_autorizados = [
                 ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
                 ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
@@ -204,6 +213,69 @@ def ver_historial():
             conexion.close()
 
         return render_template('historial.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+#----------- NUEVA MODIFICACION AGREGADA DE LOS ADMIN PENDIENTES
+@app.route('/admin/pendientes')
+def admin_pendientes():
+    # Seguridad: Solo los Admin pueden entrar aquí
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        conexion = obtener_conexion()
+        solicitudes = []
+        espacios = []
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Buscar eventos con estatus 'Propuesto'
+                sql_solicitudes = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           u.nombre_completo AS solicitante, u.cedula
+                    FROM eventos e
+                    JOIN usuarios u ON e.creador_id = u.id
+                    JOIN estados est ON e.estado_id = est.id
+                    WHERE est.nombre = 'Propuesto'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql_solicitudes)
+                solicitudes = cursor.fetchall()
+                for s in solicitudes:
+                    s['fecha'] = str(s['fecha'])
+                    s['hora_inicio'] = str(s['hora_inicio'])
+                    s['hora_fin'] = str(s['hora_fin'])
+
+                # 2. Buscar espacios físicos disponibles para llenar el menú desplegable
+                cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
+                espacios = cursor.fetchall()
+        finally:
+            conexion.close()
+        return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
+    return redirect(url_for('login'))
+
+@app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
+def procesar_solicitud(evento_id):
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        accion = request.form.get('accion')
+        espacio_id = request.form.get('espacio_id')
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                if accion == 'aprobar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
+                    estado_id = cursor.fetchone()['id']
+                    # Se actualiza el evento con el espacio seleccionado y el nuevo estatus
+                    cursor.execute(
+                        "UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;", 
+                        (estado_id, espacio_id, evento_id)
+                    )
+                    flash('Evento aprobado correctamente con espacio asignado.', 'success')
+                elif accion == 'cancelar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
+                    estado_id = cursor.fetchone()['id']
+                    cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
+                    flash('Propuesta rechazada y cancelada con éxito.', 'success')
+                conexion.commit()
+        finally:
+            conexion.close()
+        return redirect(url_for('admin_pendientes'))
     return redirect(url_for('login'))
 
 @app.route('/logout')
