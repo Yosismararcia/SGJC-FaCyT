@@ -1094,3 +1094,1127 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
 """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
+            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
+
+            if cursor.execute("SELECT COUNT(*) AS total FROM roles;") and cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+
+            if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
+
+            if cursor.execute("SELECT COUNT(*) AS total FROM espacios;") and cursor.fetchone()['total'] == 0:
+                espacios_facyt = [
+                    ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
+                    ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
+                    ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
+                ]
+                cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+
+            cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            if not cursor.fetchone():
+                cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+                role_id = cursor.fetchone()['id']
+                pass_hash = generate_password_hash('admin123')
+                cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            
+            conexion.commit()
+    finally:
+        conexion.close()
+
+
+
+<!-- Mensajes Flash globales en el Dashboard -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="max-w-7xl w-full mx-auto px-6 mt-4">
+                {% for category, message in messages %}
+                    <div class="p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-7xl w-full mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- Columna de Información del Usuario -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div>
+                <h3 class="text-lg font-bold text-gray-880 mb-4 border-b pb-2">Datos de Usuario</h3>
+                <div class="space-y-2 text-sm text-gray-600">
+                    <p><span class="font-semibold text-gray-700">Cédula:</span> {{ session['cedula'] }}</p>
+                    <p><span class="font-semibold text-gray-700">Facultad:</span> Ciencias y Tecnología (FaCyT)</p>
+                    <p><span class="font-semibold text-gray-700">Institución:</span> Universidad de Carabobo</p>
+                </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-gray-100 text-xs text-gray-400 text-center">
+                Conexión segura cifrada con SSL
+            </div>
+        </div>
+
+        <!-- Columna de Acciones Dinámicas -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 md:col-span-2">
+            <h3 class="text-lg font-bold text-gray-880 mb-4 border-b pb-2">Acciones Disponibles</h3>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                <!-- Tarjeta Proponer Actividad VINCULADA -->
+                <div class="p-4 border border-blue-100 bg-blue-50/50 rounded-lg flex flex-col justify-between">
+                    <div>
+                        <h4 class="font-bold text-blue-900 text-sm mb-1">Proponer Actividad</h4>
+                        <p class="text-xs text-gray-500 mb-4">Solicita el espacio y registra una propuesta para conferencias, ponencias o talleres.</p>
+                    </div>
+                    <a href="{{ url_for('proponer_evento') }}" class="w-full bg-blue-900 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-blue-800 transition block">
+                        Crear Solicitud
+                    </a>
+                </div>
+                <div class="p-4 border border-gray-200 rounded-lg flex flex-col justify-between">
+                    <div>
+                        <h4 class="font-bold text-gray-800 text-sm mb-1">Mis Eventos</h4>
+                        <p class="text-xs text-gray-500 mb-4">Consulta el estado de aprobación, ubicación y detalles de tus actividades solicitadas.</p>
+                    </div>
+                    <a href="{{ url_for('ver_historial') }}" class="w-full bg-gray-800 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-gray-700 transition block">
+                        Ver Historial
+                    </a>
+                </div>
+
+                {% if session['rol'] == 'Admin' %}
+                <div class="p-4 border border-purple-100 bg-purple-50/50 rounded-lg flex flex-col justify-between sm:col-span-2">
+                    <div>
+                        <span class="inline-block bg-purple-200 text-purple-800 font-bold text-[10px] px-2 py-0.5 rounded mb-2 uppercase tracking-wide">
+                            Panel de Control Administrativo
+                        </span>
+                        <h4 class="font-bold text-purple-900 text-sm mb-1">Gestión Centralizada</h4>
+                        <p class="text-xs text-gray-500 mb-4">Evalúa solicitudes de eventos pendientes, administra laboratorios/auditorios y realiza cargas de listas blancas masivas.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <a href="{{ url_for('admin_pendientes') }}" class="bg-purple-900 text-white text-center py-1.5 rounded text-xs font-semibold hover:bg-purple-800 transition block">
+                            Revisar Solicitudes Pendientes
+                        </a>
+                        <button class="border border-purple-900 text-purple-900 py-1.5 rounded text-xs font-semibold hover:bg-purple-50 transition">
+                            Cargar Personal Autorizado
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+
+    </main>
+
+
+    <!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Panel Principal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- Barra de Navegación Superior -->
+    <nav class="bg-blue-900 text-white shadow-md px-6 py-4 flex justify-between items-center">
+        <div>
+            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
+            <p class="text-xs text-blue-200">Sistema de Gestión de Eventos</p>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="text-right">
+                <p class="text-sm font-semibold">{{ session['nombre'] }}</p>
+                <span class="inline-block bg-blue-800 text-xs px-2 py-0.5 rounded-full border border-blue-600 font-medium text-blue-200">
+                    {{ session['rol'] }}
+                </span>
+            </div>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition">
+                Cerrar Sesión
+            </a>
+        </div>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-4xl w-full mx-auto flex flex-col justify-center">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="text-center mb-8">
+            <h2 class="text-2xl font-bold text-gray-800">¡Bienvenido al Panel de Control!</h2>
+            <p class="text-gray-500 text-sm mt-1">Selecciona la operación académica que deseas gestionar hoy</p>
+        </div>
+
+        <!-- Módulo del Administrador -->
+        {% if session.get('rol') == 'Admin' %}
+        <div class="bg-purple-50 border border-purple-200 rounded-xl p-5 mb-6 shadow-sm">
+            <h3 class="text-purple-900 font-bold text-sm uppercase tracking-wider mb-3">Panel de Control Administrativo</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <a href="{{ url_for('admin_pendientes') }}" class="bg-purple-700 hover:bg-purple-800 text-white p-4 rounded-lg text-center transition shadow flex flex-col justify-center items-center group">
+                    <span class="font-bold text-sm group-hover:underline">Revisar Solicitudes Pendientes</span>
+                    <span class="text-[11px] text-purple-200 mt-0.5">Asignar espacios y gestionar horarios</span>
+                </a>
+                <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:bg-gray-50 text-purple-900 border border-purple-300 p-4 rounded-lg text-center transition flex flex-col justify-center items-center">
+                    <span class="font-bold text-sm">Monitorear Cartelera Global</span>
+                    <span class="text-[11px] text-gray-500 mt-0.5">Ver control de aforos e inscritos</span>
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Módulo de Profesores y Estudiantes -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <a href="{{ url_for('proponer_evento') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Proponer Actividad</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Solicita un aula, laboratorio o el auditorio de la FaCyT para organizar un evento.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ir al formulario →</span>
+            </a>
+
+            <a href="{{ url_for('ver_historial') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Mis Eventos</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta el estatus de revisión de tus propuestas, edítalas o revisa tus espacios asignados.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver historial →</span>
+            </a>
+
+            <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Cartelera de Eventos</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta las actividades confirmadas de la facultad e inscríbete para asegurar tu cupo.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver cartelera →</span>
+            </a>
+
+        </div>
+
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs border-t border-gray-700">
+        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pymysql
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
+
+def obtener_conexion():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        database=os.getenv('DB_NAME', 'defaultdb'),
+        ssl_verify_identity=False,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+def inicializar_base_de_datos():
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
+            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
+            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eventos (
+                    id INT AUTO_INCREMENT PRIMARY KEY, 
+                    titulo VARCHAR(150) NOT NULL, 
+                    tipo_actividad VARCHAR(50) NOT NULL, 
+                    fecha DATE NOT NULL, 
+                    hora_inicio TIME NOT NULL, 
+                    hora_fin TIME NOT NULL, 
+                    estado_id INT NOT NULL, 
+                    espacio_id INT NULL, 
+                    creador_id INT NOT NULL,
+                    cupos_disponibles INT NULL,
+                    FOREIGN KEY (estado_id) REFERENCES estados(id), 
+                    FOREIGN KEY (espacio_id) REFERENCES espacios(id), 
+                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
+                );
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inscripciones (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    usuario_id INT NOT NULL,
+                    evento_id INT NOT NULL,
+                    fecha_inscripcion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY un_registro (usuario_id, evento_id),
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
+                );
+            """)
+
+            try:
+                cursor.execute("ALTER TABLE eventos ADD COLUMN cupos_disponibles INT NULL;")
+            except:
+                pass
+
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
+
+            cursor.execute("SELECT COUNT(*) AS total FROM espacios;")
+            if cursor.fetchone()['total'] == 0:
+                espacios_facyt = [
+                    ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
+                    ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
+                    ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
+                ]
+                cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+
+            usuarios_autorizados = [
+                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
+                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
+                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+            ]
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+
+            cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            if not cursor.fetchone():
+                cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+                role_id = cursor.fetchone()['id']
+                pass_hash = generate_password_hash('admin123')
+                cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            
+            conexion.commit()
+    except Exception as e:
+        print(f"Error al inicializar base de datos: {str(e)}")
+    finally:
+        conexion.close()
+
+@app.route('/')
+def home():
+    inicializar_base_de_datos()
+    if 'usuario_id' in session:
+        return render_template('dashboard.html')
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        correo = request.form['correo']
+        password = request.form['password']
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                sql = "SELECT u.*, r.nombre AS rol_nombre FROM usuarios u JOIN roles r ON u.role_id = r.id WHERE u.correo = %s;"
+                cursor.execute(sql, (correo,))
+                usuario = cursor.fetchone()
+                if usuario and check_password_hash(usuario['password_hash'], password):
+                    session['usuario_id'] = usuario['id']
+                    session['nombre'] = usuario['nombre_completo']
+                    session['rol'] = usuario['rol_nombre']
+                    session['cedula'] = usuario['cedula']
+                    return redirect(url_for('home'))
+                else:
+                    flash('Correo o contraseña incorrectos.', 'error')
+        finally:
+            conexion.close()
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        cedula = request.form['cedula'].strip()
+        nombre = request.form['nombre'].strip()
+        correo = request.form['correo'].strip()
+        password = request.form['password']
+
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", (cedula, correo))
+                personal = cursor.fetchone()
+
+                if not personal:
+                    flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
+                    return redirect(url_for('register'))
+
+                cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
+                if cursor.fetchone():
+                    flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
+                    return redirect(url_for('register'))
+
+                cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
+                role_id = cursor.fetchone()['id']
+
+                password_hash = generate_password_hash(password)
+                sql_insert = "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);"
+                cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
+                conexion.commit()
+
+                flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
+                return redirect(url_for('login'))
+        finally:
+            conexion.close()
+    return render_template('register.html')
+
+@app.route('/proponer', methods=['GET', 'POST'])
+def proponer_evento():
+    if 'usuario_id' in session:
+        if request.method == 'POST':
+            titulo = request.form['titulo'].strip()
+            tipo_actividad = request.form['tipo_actividad']
+            fecha = request.form['fecha']
+            hora_inicio = request.form['hora_inicio']
+            hora_fin = request.form['hora_fin']
+            creador_id = session['usuario_id']
+
+            if hora_inicio >= hora_fin:
+                flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
+                return render_template('proponer.html')
+
+            conexion = obtener_conexion()
+            try:
+                with conexion.cursor() as cursor:
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
+                    estado_id = cursor.fetchone()['id']
+
+                    sql_evento = """
+                        INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """
+                    cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id))
+                    conexion.commit()
+                    
+                flash('¡Propuesta enviada con éxito! Está en revisión administrativa.', 'success')
+                return redirect(url_for('home'))
+            except Exception as e:
+                flash(f'Error en el sistema al guardar la actividad: {str(e)}', 'error')
+            finally:
+                conexion.close()
+
+        return render_template('proponer.html')
+    return redirect(url_for('login'))
+
+@app.route('/historial')
+def ver_historial():
+    if 'usuario_id' in session:
+        creador_id = session['usuario_id']
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre, e.cupos_disponibles
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    LEFT JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE e.creador_id = %s
+                    ORDER BY e.fecha DESC, e.hora_inicio DESC;
+                """
+                cursor.execute(sql, (creador_id,))
+                eventos = cursor.fetchall()
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])
+                    ev['hora_fin'] = str(ev['hora_fin'])
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = 0
+        except Exception as e:
+            flash(f'Error al cargar el historial: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return render_template('historial.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+@app.route('/evento/editar/<int:evento_id>', methods=['GET', 'POST'])
+def editar_evento(evento_id):
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("""
+                    SELECT e.*, est.nombre AS estado_nombre 
+                    FROM eventos e 
+                    JOIN estados est ON e.estado_id = est.id 
+                    WHERE e.id = %s AND e.creador_id = %s;
+                """, (evento_id, session['usuario_id']))
+                evento = cursor.fetchone()
+
+                if not evento or evento['estado_nombre'] != 'Propuesto':
+                    flash('No puedes modificar un evento que ya fue procesado o no te pertenece.', 'error')
+                    return redirect(url_for('ver_historial'))
+
+                if request.method == 'POST':
+                    titulo = request.form['titulo'].strip()
+                    tipo_actividad = request.form['tipo_actividad']
+                    fecha = request.form['fecha']
+                    hora_inicio = request.form['hora_inicio']
+                    hora_fin = request.form['hora_fin']
+
+                    if hora_inicio >= hora_fin:
+                        flash('Error: La hora de inicio debe ser anterior.', 'error')
+                        return redirect(url_for('editar_evento', evento_id=evento_id))
+
+                    cursor.execute("""
+                        UPDATE eventos 
+                        SET titulo = %s, tipo_actividad = %s, fecha = %s, hora_inicio = %s, hora_fin = %s 
+                        WHERE id = %s;
+                    """, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, evento_id))
+                    conexion.commit()
+                    flash('Propuesta actualizada correctamente.', 'success')
+                    return redirect(url_for('ver_historial'))
+
+                evento['fecha'] = str(evento['fecha'])
+                evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
+                evento['hora_fin'] = str(evento['hora_fin'])[:5]
+                return render_template('editar_evento.html', evento=evento)
+        finally:
+            conexion.close()
+    return redirect(url_for('login'))
+
+@app.route('/evento/eliminar/<int:evento_id>')
+def eliminar_evento(evento_id):
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("""
+                    SELECT e.*, est.nombre AS estado_nombre 
+                    FROM eventos e 
+                    JOIN estados est ON e.estado_id = est.id 
+                    WHERE e.id = %s AND e.creador_id = %s;
+                """, (evento_id, session['usuario_id']))
+                evento = cursor.fetchone()
+
+                if evento and evento['estado_nombre'] == 'Propuesto':
+                    cursor.execute("DELETE FROM eventos WHERE id = %s;", (evento_id,))
+                    conexion.commit()
+                    flash('La propuesta ha sido eliminada permanentemente.', 'success')
+                else:
+                    flash('No puedes eliminar este evento.', 'error')
+        except Exception as e:
+            flash(f'Error al eliminar el evento: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return redirect(url_for('ver_historial'))
+    return redirect(url_for('login'))
+
+@app.route('/admin/pendientes')
+def admin_pendientes():
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        conexion = obtener_conexion()
+        solicitudes = []
+        espacios = []
+        try:
+            with conexion.cursor() as cursor:
+                sql_solicitudes = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           u.nombre_completo AS solicitante, u.cedula
+                    FROM eventos e
+                    JOIN usuarios u ON e.creador_id = u.id
+                    JOIN estados est ON e.estado_id = est.id
+                    WHERE est.nombre = 'Propuesto'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql_solicitudes)
+                solicitudes = cursor.fetchall()
+                for s in solicitudes:
+                    s['fecha'] = str(s['fecha'])
+                    s['hora_inicio'] = str(s['hora_inicio'])
+                    s['hora_fin'] = str(s['hora_fin'])
+
+                cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
+                espacios = cursor.fetchall()
+        except Exception as e:
+            flash(f'Error al cargar solicitudes administrativas: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
+    return redirect(url_for('login'))
+
+@app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
+def procesar_solicitud(evento_id):
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        accion = request.form.get('accion')
+        espacio_id = request.form.get('espacio_id')
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                if accion == 'aprobar':
+                    cursor.execute("SELECT fecha, hora_inicio, hora_fin FROM eventos WHERE id = %s;", (evento_id,))
+                    ev_actual = cursor.fetchone()
+                    
+                    sql_choque = """
+                        SELECT id, titulo FROM eventos 
+                        WHERE espacio_id = %s AND fecha = %s AND estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
+                        AND ((hora_inicio < %s AND hora_fin > %s) OR (hora_inicio < %s AND hora_fin > %s) OR (hora_inicio >= %s AND hora_fin <= %s));
+                    """
+                    cursor.execute(sql_choque, (espacio_id, ev_actual['fecha'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_inicio'], ev_actual['hora_fin']))
+                    choque = cursor.fetchone()
+                    
+                    if choque:
+                        flash(f'¡CHOQUE DE HORARIO! El espacio ya está ocupado por: "{choque["titulo"]}". Selecciona otro espacio u horario.', 'error')
+                        return redirect(url_for('admin_pendientes'))
+
+                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (espacio_id,))
+                    capacidad_max = cursor.fetchone()['capacidad']
+
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
+                    estado_id = cursor.fetchone()['id']
+                    
+                    cursor.execute("""
+                        UPDATE eventos 
+                        SET estado_id = %s, espacio_id = %s, cupos_disponibles = %s 
+                        WHERE id = %s;
+                    """, (estado_id, espacio_id, capacidad_max, evento_id))
+                    flash('Evento aprobado correctamente. Cupos inicializados según la capacidad del aula.', 'success')
+                    
+                elif accion == 'cancelar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
+                    estado_id = cursor.fetchone()['id']
+                    cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
+                    flash('Propuesta rechazada y cancelada con éxito.', 'success')
+                conexion.commit()
+        except Exception as e:
+            flash(f'Error en el servidor al procesar la solicitud: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return redirect(url_for('admin_pendientes'))
+    return redirect(url_for('login'))
+
+@app.route('/cartelera')
+def cartelera_eventos():
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
+                           (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE est.nombre = 'Aprobado'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql, (session['usuario_id'],))
+                eventos = cursor.fetchall()
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
+                    
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = ev['capacidad_max']
+                    
+                    if ev['capacidad_max'] and ev['capacidad_max'] > 0:
+                        ocupados = ev['capacidad_max'] - ev['cupos_disponibles']
+                        ev['porcentaje_ocupacion'] = int((ocupados / ev['capacidad_max']) * 100)
+                    else:
+                        ev['porcentaje_ocupacion'] = 0
+        except Exception as e:
+            flash(f'Error al acceder a la cartelera: {str(e)}', 'error')
+            return redirect(url_for('home'))
+        finally:
+            conexion.close()
+        return render_template('cartelera.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+@app.route('/inscribir/<int:evento_id>', methods=['POST'])
+def inscribir_en_evento():
+    if 'usuario_id' in session:
+        if session.get('rol') != 'Estudiante':
+            flash('Solo los usuarios con rol de Estudiante pueden inscribirse en los eventos.', 'error')
+            return redirect(url_for('cartelera_eventos'))
+            
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("SELECT cupos_disponibles, espacio_id FROM eventos WHERE id = %s FOR UPDATE;", (evento_id,))
+                evento = cursor.fetchone()
+                
+                if not evento:
+                    flash('El evento no existe.', 'error')
+                    return redirect(url_for('cartelera_eventos'))
+                
+                actual_cupos = evento['cupos_disponibles']
+                if actual_cupos is None:
+                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (evento['espacio_id'],))
+                    actual_cupos = cursor.fetchone()['capacidad']
+                
+                if actual_cupos <= 0:
+                    flash('Lo sentimos, ya no quedan cupos disponibles para esta actividad.', 'error')
+                    return redirect(url_for('cartelera_eventos'))
+                
+                try:
+                    cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (session['usuario_id'], evento_id))
+                    cursor.execute("UPDATE eventos SET cupos_disponibles = %s - 1 WHERE id = %s;", (actual_cupos, evento_id))
+                    conexion.commit()
+                    flash('¡Te has inscrito exitosamente en el evento!', 'success')
+                except pymysql.err.IntegrityError:
+                    flash('Ya te encuentras registrado en esta actividad.', 'error')
+        except Exception as e:
+            flash(f'Error en el proceso de inscripción: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return redirect(url_for('cartelera_eventos'))
+    return redirect(url_for('login'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'success')
+    return redirect(url_for('login'))
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
+
+
+
+
+#porque se enlazo otro modulo el del admin cartelera inscribir
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Panel Principal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
+            <p class="text-xs text-blue-200">Sistema de Gestión de Espacios — FaCyT UC</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-right hidden sm:block">
+                <p class="text-sm font-semibold">{{ session.get('nombre') }}</p>
+                <p class="text-[10px] bg-blue-800 px-2 py-0.5 rounded inline-block text-blue-100 uppercase font-bold">{{ session.get('rol') }}</p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+                Cerrar Sesión
+            </a>
+        </div>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-4xl w-full mx-auto flex flex-col justify-center">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="text-center mb-8">
+            <h2 class="text-2xl font-bold text-gray-800">¡Bienvenido al Panel de Control!</h2>
+            <p class="text-gray-500 text-sm mt-1">Selecciona la operación académica que deseas gestionar hoy</p>
+        </div>
+
+        <!-- Módulo del Administrador -->
+        {% if session.get('rol') == 'Admin' %}
+        <div class="bg-purple-50 border border-purple-200 rounded-xl p-5 mb-6 shadow-sm">
+            <h3 class="text-purple-900 font-bold text-sm uppercase tracking-wider mb-3">Panel de Control Administrativo</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <a href="{{ url_for('admin_pendientes') }}" class="bg-purple-700 hover:bg-purple-800 text-white p-4 rounded-lg text-center transition shadow flex flex-col justify-center items-center group">
+                    <span class="font-bold text-sm group-hover:underline">Revisar Solicitudes Pendientes</span>
+                    <span class="text-[11px] text-purple-200 mt-0.5">Asignar espacios y gestionar horarios</span>
+                </a>
+                <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:bg-gray-50 text-purple-900 border border-purple-300 p-4 rounded-lg text-center transition flex flex-col justify-center items-center">
+                    <span class="font-bold text-sm">Monitorear Cartelera Global</span>
+                    <span class="text-[11px] text-gray-500 mt-0.5">Ver control de aforos e inscritos</span>
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Módulo de Profesores y Estudiantes -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <a href="{{ url_for('proponer_evento') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Proponer Actividad</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Solicita un aula, laboratorio o el auditorio de la FaCyT para organizar un evento.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ir al formulario →</span>
+            </a>
+
+            <a href="{{ url_for('ver_historial') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Mis Eventos</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta el estatus de revisión de tus propuestas, edítalas o revisa tus espacios asignados.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver historial →</span>
+            </a>
+
+            <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
+                <div>
+                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Cartelera de Eventos</h4>
+                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta las actividades confirmadas de la facultad e inscríbete para asegurar tu cupo.</p>
+                </div>
+                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver cartelera →</span>
+            </a>
+
+        </div>
+
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Monitor de Cartelera</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Monitor Global de Cartelera</h1>
+            <p class="text-xs text-slate-400">Panel de Control de Asistencia e Inscripciones Manuales</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="space-y-8">
+            {% if eventos %}
+                {% for ev in eventos %}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden grid grid-cols-1 lg:grid-cols-3">
+                    
+                    <!-- Información General del Evento -->
+                    <div class="p-6 bg-slate-50 border-r border-gray-100 flex flex-col justify-between">
+                        <div>
+                            <span class="bg-slate-200 text-slate-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase">
+                                {{ ev.tipo_actividad }}
+                            </span>
+                            <h3 class="font-bold text-gray-900 text-base mt-2 mb-3">{{ ev.titulo }}</h3>
+                            
+                            <div class="space-y-1.5 text-xs text-gray-600">
+                                <p><span class="font-semibold text-gray-700">Ubicación:</span> {{ ev.espacio_nombre }}</p>
+                                <p><span class="font-semibold text-gray-700">Capacidad Total:</span> {{ ev.capacidad_max }} asientos</p>
+                                <p><span class="font-semibold text-gray-700">Cupos Libres:</span> <span class="font-bold text-blue-600">{{ ev.cupos_disponibles }}</span></p>
+                                <p><span class="font-semibold text-gray-700">Fecha y Hora:</span> {{ ev.fecha }} | {{ ev.hora_inicio }} - {{ ev.hora_fin }}</p>
+                            </div>
+                        </div>
+
+                        <!-- Formulario de Inscripción Manual -->
+                        <div class="mt-6 border-t border-gray-200 pt-4">
+                            <h4 class="text-xs font-bold text-gray-700 uppercase mb-2">Inscripción Manual de Alumno</h4>
+                            <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST" class="flex gap-2">
+                                <input type="text" name="cedula_estudiante" placeholder="Cédula del estudiante" required
+                                       class="bg-white border border-gray-300 rounded px-2 py-1 text-xs flex-grow focus:outline-none focus:border-slate-900">
+                                <button type="submit" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-3 py-1 rounded text-xs transition">
+                                    Inscribir
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Lista de Alumnos Inscritos -->
+                    <div class="p-6 lg:col-span-2 flex flex-col justify-between">
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Estudiantes Registrados ({{ ev.inscritos|length }})</h4>
+                            
+                            {% if ev.inscritos %}
+                            <div class="max-h-40 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-100">
+                                {% for alumno in ev.inscritos %}
+                                <div class="p-2.5 flex justify-between items-center text-xs hover:bg-gray-50 transition">
+                                    <div>
+                                        <p class="font-semibold text-gray-900">{{ alumno.nombre_completo }}</p>
+                                        <p class="text-gray-500 text-[11px]">C.I: {{ alumno.cedula }} | {{ alumno.correo }}</p>
+                                    </div>
+                                    <span class="text-gray-400 text-[10px] italic">
+                                        {{ str(alumno.fecha_inscripcion)[:16] if alumno.fecha_inscripcion else 'Manual' }}
+                                    </span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="border border-dashed border-gray-200 rounded-lg p-6 text-center text-gray-400 italic text-xs">
+                                No hay estudiantes inscritos en esta actividad todavía.
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="bg-white rounded-lg border border-gray-200 p-12 text-center">
+                    <p class="text-gray-400 italic text-sm">No hay actividades aprobadas en la cartelera general en este momento.</p>
+                </div>
+            {% endif %}
+        </div>
+    </main>
+
+    <footer class="bg-slate-900 text-slate-500 text-center py-4 text-xs border-t border-slate-800">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Panel de Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Header / Navbar -->
+    <header class="bg-blue-950 text-white px-6 py-4 flex justify-between items-center shadow-md">
+        <div>
+            <h1 class="text-xl font-bold tracking-tight">SGC-FaCyT</h1>
+            <p class="text-xs text-blue-300">Sistema de Gestión de Cartelera — FaCyT UC</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-right hidden sm:block">
+                <p class="text-sm font-semibold">{{ session.get('nombre') }}</p>
+                <span class="bg-blue-800 text-blue-100 font-bold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    {{ session.get('rol') }}
+                </span>
+            </div>
+            <a href="{{ url_for('logout') }}" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+                Cerrar Sesión
+            </a>
+        </div>
+    </header>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-4xl w-full mx-auto flex flex-col justify-center">
+        
+        <!-- Mensajes Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Bienvenida -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8 text-center sm:text-left">
+            <h2 class="text-xl font-bold text-gray-900 mb-1">¡Hola de nuevo, {{ session.get('nombre') }}!</h2>
+            <p class="text-gray-600 text-sm">Desde aquí tienes acceso a las operaciones permitidas para tu perfil académico institucional.</p>
+        </div>
+
+        <!-- Módulos dinámicos por Rol -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            
+            <!-- SECCIÓN ADMINISTRADOR -->
+            {% if session.get('rol') == 'Admin' %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Solicitudes Pendientes</h3>
+                        <p class="text-gray-500 text-xs mb-4">Evalúa las actividades propuestas por los profesores, gestiona aulas y asigna espacios evitando colisiones de horario.</p>
+                    </div>
+                    <a href="{{ url_for('admin_pendientes') }}" class="bg-blue-950 hover:bg-blue-900 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Revisar Propuestas
+                    </a>
+                </div>
+
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Monitorear Cartelera Global</h3>
+                        <p class="text-gray-500 text-xs mb-4">Visualiza qué eventos están activos, audita los alumnos inscritos por actividad y procesa inscripciones manuales de estudiantes.</p>
+                    </div>
+                    <a href="{{ url_for('admin_cartelera') }}" class="bg-slate-800 hover:bg-slate-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Abrir Monitor e Inscribir
+                    </a>
+                </div>
+            {% endif %}
+
+            <!-- SECCIÓN PROFESOR / PROPONENTE -->
+            {% if session.get('rol') in ['Admin', 'Profesor'] %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Proponer Nueva Actividad</h3>
+                        <p class="text-gray-500 text-xs mb-4">Registra la planificación de tus eventos de extensión, congresos o talleres para someterlos a aprobación.</p>
+                    </div>
+                    <a href="{{ url_for('proponer_evento') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Crear Propuesta
+                    </a>
+                </div>
+
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Mis Actividades Propuestas</h3>
+                        <p class="text-gray-500 text-xs mb-4">Consulta el estado en tiempo real de tus solicitudes enviadas, modifica datos corregibles o elimina eventos cancelados.</p>
+                    </div>
+                    <a href="{{ url_for('ver_historial') }}" class="bg-gray-800 hover:bg-gray-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Ver Mi Historial
+                    </a>
+                </div>
+            {% endif %}
+
+            <!-- SECCIÓN ESTUDIANTE -->
+            {% if session.get('rol') == 'Estudiante' %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition col-span-1 sm:col-span-2">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Ver Cartelera de Actividades</h3>
+                        <p class="text-gray-500 text-xs mb-4">Explora todos los eventos científicos y académicos aprobados por la facultad, comprueba la disponibilidad de cupos en tiempo real e inscríbete para reservar tu asiento.</p>
+                    </div>
+                    <a href="{{ url_for('cartelera_eventos') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Explorar Cartelera de Eventos
+                    </a>
+                </div>
+            {% endif %}
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-gray-500 text-center py-4 text-xs border-t border-gray-800">
+        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) © 2026
+    </footer>
+
+</body>
+</html>
