@@ -32,10 +32,23 @@
             {% endif %}
         {% endwith %}
 
-        {% if session.get('rol') != 'Estudiante' %}
-            <div class="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm">
-                <strong>Nota informativa:</strong> Estás navegando como <strong>{{ session.get('rol') }}</strong>. Puedes visualizar los cupos y la disponibilidad horaria de la cartelera, pero la opción de inscripción está reservada exclusivamente para cuentas de <strong>Estudiantes</strong>.
-            </div>
+        <!-- Si el usuario es Estudiante, se le muestra el botón de inscripción o el estado de su cupo -->
+        {% if session['rol'] == 'Estudiante' %}
+            {% if evento.id in inscritos_usuario %}
+                <button class="w-full bg-slate-100 text-slate-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
+                    ✓ Ya estás inscrito
+                </button>
+            {% elif evento.cupos_disponibles <= 0 %}
+                <button class="w-full bg-red-100 text-red-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
+                    Agotado
+                </button>
+            {% else %}
+                <form action="{{ url_for('inscribir_en_evento', evento_id=evento.id) }}" method="POST">
+                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-xs transition shadow-sm">
+                        Inscribirme en este evento
+                    </button>
+                </form>
+            {% endif %}
         {% endif %}
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -83,7 +96,7 @@
                                 <span>{{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }} asientos</span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-1.5">
-                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ ((ev.capacidad_max - ev.cupos_disponibles) / ev.capacidad_max * 100)|int }}%"></div>
+                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ ((ev.capacidad_max - ev.cupos_disponibles) / ev.capacidad_max * 100) | int }}%"></div>
                             </div>
                         </div>
                     </div>
