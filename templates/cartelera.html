@@ -22,6 +22,7 @@
     <!-- Contenido -->
     <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
         
+        <!-- Mensajes Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -32,29 +33,13 @@
             {% endif %}
         {% endwith %}
 
-        <!-- Si el usuario es Estudiante, se le muestra el botón de inscripción o el estado de su cupo -->
-        {% if session['rol'] == 'Estudiante' %}
-            {% if evento.id in inscritos_usuario %}
-                <button class="w-full bg-slate-100 text-slate-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
-                    ✓ Ya estás inscrito
-                </button>
-            {% elif evento.cupos_disponibles <= 0 %}
-                <button class="w-full bg-red-100 text-red-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
-                    Agotado
-                </button>
-            {% else %}
-                <form action="{{ url_for('inscribir_en_evento', evento_id=evento.id) }}" method="POST">
-                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-xs transition shadow-sm">
-                        Inscribirme en este evento
-                    </button>
-                </form>
-            {% endif %}
-        {% endif %}
-
+        <!-- Grilla de Tarjetas -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {% if eventos %}
                 {% for ev in eventos %}
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    
+                    <!-- Cuerpo de la Tarjeta -->
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-3">
                             <span class="bg-blue-100 text-blue-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase">
@@ -92,15 +77,18 @@
                         <!-- Barra de progreso visual de aforo -->
                         <div class="mt-4">
                             <div class="flex justify-between text-[11px] text-gray-500 mb-1">
-                                <span>Capacidad ocupada</span>
+                                <span>Capacidad ocupada:</span>
                                 <span>{{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }} asientos</span>
                             </div>
-                            <div class="w-full bg-gray-200 rounded-full h-1.5">
-                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ ((ev.capacidad_max - ev.cupos_disponibles) / ev.capacidad_max * 100) | int }}%"></div>
+                            <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                                {% set ocupados = ev.capacidad_max - ev.cupos_disponibles %}
+                                {% set porcentaje = ((ocupados / ev.capacidad_max) * 100) | int %}
+                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ porcentaje }}%"></div>
                             </div>
                         </div>
-                    </div>
+                    </div> <!-- Cierre correcto del p-5 -->
 
+                    <!-- Sección de Acción inferior -->
                     <div class="p-4 bg-gray-50 border-t border-gray-100">
                         {% if session.get('rol') == 'Estudiante' %}
                             {% if ev.ya_inscrito > 0 %}
@@ -134,6 +122,7 @@
         </div>
     </main>
 
+    <!-- Footer -->
     <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
         Universidad de Carabobo — FaCyT 2026
     </footer>
