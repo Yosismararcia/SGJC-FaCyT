@@ -478,7 +478,7 @@ def admin_cartelera():
     return redirect(url_for('login'))
 
 @app.route('/inscribir/<int:evento_id>', methods=['POST'])
-def inscribir_en_evento():
+def inscribir_en_evento(evento_id):
     if 'usuario_id' in session:
         rol_actual = session.get('rol')
         target_usuario_id = None
@@ -486,14 +486,13 @@ def inscribir_en_evento():
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # 1. Determinar quién se está inscribiendo
+                # 1. Identificar al usuario que se va a inscribir
                 if rol_actual == 'Admin':
                     cedula_estudiante = request.form.get('cedula_estudiante', '').strip()
                     if not cedula_estudiante:
                         flash('Error: Debes ingresar la cédula del estudiante.', 'error')
                         return redirect(url_for('admin_cartelera'))
                     
-                    # Verificar si la cédula pertenece a un estudiante registrado
                     cursor.execute("""
                         SELECT u.id FROM usuarios u 
                         JOIN roles r ON u.role_id = r.id 
@@ -508,34 +507,41 @@ def inscribir_en_evento():
                     target_usuario_id = session['usuario_id']
                 else:
                     flash('Tu rol actual no te permite realizar inscripciones.', 'error')
-                    return redirect(url_for('cartelera_eventos'))
+                    return redirect(url_for('home'))
 
-                # 2. Verificar disponibilidad del evento
-                cursor.execute("SELECT cupos_disponibles, espacio_id FROM eventos WHERE id = %s FOR UPDATE;", (evento_id,))
+                # 2. Consultar datos de cupos de forma segura (sin FOR UPDATE problemático)
+                cursor.execute("""
+                    SELECT e.cupos_disponibles, esp.capacidad 
+                    FROM eventos e 
+                    JOIN espacios esp ON e.espacio_id = esp.id 
+                    WHERE e.id = %s;
+                """, (evento_id,))
                 evento = cursor.fetchone()
                 
                 if not evento:
                     flash('El evento seleccionado ya no está disponible.', 'error')
                     return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
                 
-                actual_cupos = evento['cupos_disponibles']
-                if actual_cupos is None:
-                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (evento['espacio_id'],))
-                    actual_cupos = cursor.fetchone()['capacidad']
+                # Tratar valores nulos con un fallback numérico seguro
+                cupos_actuales = evento['cupos_disponibles']
+                if cupos_actuales is None:
+                    cupos_actuales = evento['capacidad']
                 
-                if actual_cupos <= 0:
+                if cupos_actuales <= 0:
                     flash('Lo sentimos, ya no quedan cupos disponibles para esta actividad.', 'error')
                     return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
                 
+                # 3. Realizar la inscripción de forma segura
                 try:
                     cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (target_usuario_id, evento_id))
-                    cursor.execute("UPDATE eventos SET cupos_disponibles = %s - 1 WHERE id = %s;", (actual_cupos, evento_id))
+                    cursor.execute("UPDATE eventos SET cupos_disponibles = %s WHERE id = %s;", (cupos_actuales - 1, evento_id))
                     conexion.commit()
                     flash('¡Inscripción procesada con éxito!', 'success')
                 except pymysql.err.IntegrityError:
                     flash('El estudiante ya se encuentra registrado en esta actividad.', 'error')
+                    
         except Exception as e:
-            flash(f'Error en el proceso de inscripción: {str(e)}', 'error')
+            flash(f'Error interno en el proceso de inscripción: {str(e)}', 'error')
         finally:
             conexion.close()
             
