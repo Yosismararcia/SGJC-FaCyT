@@ -2689,3 +2689,58 @@ por si
 
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@app.route('/cartelera')
+def cartelera_eventos():
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
+                           (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE est.nombre = 'Aprobado'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql, (session['usuario_id'],))
+                eventos = cursor.fetchall()
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
+                    
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = ev['capacidad_max']
+                    
+                    if ev['capacidad_max'] and ev['capacidad_max'] > 0:
+                        ocupados = ev['capacidad_max'] - ev['cupos_disponibles']
+                        ev['porcentaje_ocupacion'] = int((ocupados / ev['capacidad_max']) * 100)
+                    else:
+                        ev['porcentaje_ocupacion'] = 0
+        except Exception as e:
+            flash(f'Error al acceder a la cartelera: {str(e)}', 'error')
+            return redirect(url_for('home'))
+        finally:
+            conexion.close()
+        return render_template('cartelera.html', eventos=eventos)
+    return redirect(url_for('login'))

@@ -3,6 +3,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 import pymysql
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -60,10 +62,21 @@ def inicializar_base_de_datos():
                 );
             """)
 
+            #agrego la columna cupos_disponibles a la tabla eventos si no existía antes
             try:
                 cursor.execute("ALTER TABLE eventos ADD COLUMN cupos_disponibles INT NULL;")
             except:
                 pass
+            # 2. modificacion DE MIGRACIÓN: Agrega las columnas si la tabla ya existía antes
+            try:
+                cursor.execute("ALTER TABLE eventos ADD COLUMN estado TEXT DEFAULT 'Solicitado';")
+            except Exception:
+                pass  # Si ya existía la columna, ignora el error de forma segura
+
+            try:
+                cursor.execute("ALTER TABLE eventos ADD COLUMN fecha_elim TEXT NULL;")
+            except Exception:
+                pass  # Si ya existía la columna, ignora el error de forma segura
 
             cursor.execute("SELECT COUNT(*) AS total FROM roles;")
             if cursor.fetchone()['total'] == 0:
@@ -445,19 +458,28 @@ def cartelera_eventos():
         conexion = obtener_conexion()
         eventos = []
         try:
+            # Obtenemos la fecha actual del servidor en formato texto 'YYYY-MM-DD'
+            fecha_actual_str = datetime.now().strftime('%Y-%m-%d')
+            
             with conexion.cursor() as cursor:
+                # Modificamos la consulta para traer est.nombre AS estado, e.fecha_elim
+                # Y expandimos el WHERE para validar los estados y la purga automática
                 sql = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
                            e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
+                           est.nombre AS estado, e.fecha_elim,
                            (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
                     FROM eventos e
                     JOIN estados est ON e.estado_id = est.id
                     JOIN espacios esp ON e.espacio_id = esp.id
-                    WHERE est.nombre = 'Aprobado'
+                    WHERE est.nombre IN ('Aprobado', 'Realizado', 'Cancelado')
+                      AND (e.fecha_elim IS NULL OR e.fecha_elim >= %s)
                     ORDER BY e.fecha ASC;
                 """
-                cursor.execute(sql, (session['usuario_id'],))
+                # Ejecutamos pasando el ID de usuario para las inscripciones y la fecha actual para la eliminacion
+                cursor.execute(sql, (session['usuario_id'], fecha_actual_str))
                 eventos = cursor.fetchall()
+                
                 for ev in eventos:
                     ev['fecha'] = str(ev['fecha'])
                     ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
@@ -520,6 +542,56 @@ def admin_cartelera():
             conexion.close()
         return render_template('admin_cartelera.html', eventos=eventos)
     return redirect(url_for('login'))
+
+@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
+@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
+def cambiar_estado(evento_id):
+    # Validar que el usuario tenga sesión activa y sea Administrador
+    if 'usuario_id' not in session or session.get('rol') != 'Administrador':
+        flash("Acceso denegado. Se requieren permisos de Administrador.", "error")
+        return redirect(url_for('home'))
+        
+    nuevo_estado = request.form.get('estado')  # Solicitado, En Revisión, Aprobado, Realizado, Cancelado, Rechazado
+    dias_visibilidad = request.form.get('dias_elim', '0')
+    
+    # Validar de forma segura la conversión de los días de purga
+    try:
+        dias_visibilidad = int(dias_visibilidad)
+    except ValueError:
+        dias_visibilidad = 0
+    
+    fecha_elim = None
+    # Si el evento ya se realizó, calculamos de forma programada cuándo sacarlo de la vista pública
+    if nuevo_estado == 'Realizado' and dias_visibilidad > 0:
+        fecha_calculada = datetime.now() + timedelta(days=dias_visibilidad)
+        fecha_elim = fecha_calculada.strftime('%Y-%m-%d')
+    elif nuevo_estado == 'Aprobado':
+        fecha_elim = None  # Se mantiene visible sin fecha límite hasta que se realice
+
+    # Conexión y ejecución segura en tu base de datos relacional
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # Buscamos el estado_id correspondiente al nombre del estado enviado y actualizamos el evento
+            sql = """
+                UPDATE eventos 
+                SET estado_id = (SELECT id FROM estados WHERE nombre = %s), 
+                    fecha_elim = %s 
+                WHERE id = %s;
+            """
+            cursor.execute(sql, (nuevo_estado, fecha_elim, evento_id))
+        
+        # Guardamos los cambios definitivamente en MySQL
+        conexion.commit()
+        flash(f"El estado del evento ha sido cambiado a: {nuevo_estado}", "success")
+        
+    except Exception as e:
+        flash(f"Error al cambiar el estado del evento: {str(e)}", "error")
+    finally:
+        conexion.close()
+        
+    # Redirección a tu panel de administración (Asegúrate de que 'admin_dashboard' sea el nombre exacto de tu ruta)
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/inscribir/<int:evento_id>', methods=['POST'])
 def inscribir_en_evento(evento_id):
