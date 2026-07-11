@@ -2218,3 +2218,308 @@ DOCTYPE html>
 
 </body>
 </html>
+
+
+
+
+
+
+por si
+
+
+!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Panel Principal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md">
+        <div>
+            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
+            <p class="text-xs text-slate-400">Sistema de Gestión de Cartelera • Versión 1-2026</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="text-xs bg-slate-850 px-3 py-1.5 rounded-lg border border-slate-700">
+                👤 <span class="font-semibold">{{ session['nombre'] }}</span> ({{ session['rol'] }})
+            </span>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition">
+                Cerrar Sesión
+            </a>
+        </div>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        
+        <!-- Mensajes Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- BIENVENIDA -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">¡Bienvenido al Panel de Gestión!</h2>
+                <p class="text-sm text-gray-500 mt-1">Monitorea el estado de las actividades y la ocupación de espacios físicos de la facultad.</p>
+            </div>
+            
+            <!-- Acciones según el Rol -->
+            <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                {% if session['rol'] == 'Admin' %}
+                    <a href="{{ url_for('admin_pendientes') }}" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📥 Revisar Solicitudes ({{ stats['pendientes'] }})
+                    </a>
+                    <a href="{{ url_for('admin_cartelera') }}" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📊 Monitor General
+                    </a>
+                {% endif %}
+                
+                {% if session['rol'] == 'Profesor' %}
+                    <a href="{{ url_for('proponer_evento') }}" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        ➕ Proponer Nueva Actividad
+                    </a>
+                    <a href="{{ url_for('ver_historial') }}" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📂 Mis Propuestas
+                    </a>
+                {% endif %}
+                
+                <a href="{{ url_for('cartelera_eventos') }}" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                    📢 Ver Cartelera Pública
+                </a>
+            </div>
+        </div>
+
+        <!-- SECCIÓN DE VISTA RESUMEN (Métricas Organizacionales) -->
+        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">Indicadores de Gestión de Eventos</h3>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <!-- Card 1 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                <p class="text-xs font-medium text-gray-400 uppercase">Total Eventos Registrados</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['total_eventos'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Historial acumulado en el ciclo</p>
+            </div>
+            <!-- Card 2 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-amber-500">
+                <p class="text-xs font-medium text-amber-600 uppercase">Eventos por Evaluar</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['pendientes'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Esperando resolución horaria</p>
+            </div>
+            <!-- Card 3 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
+                <p class="text-xs font-medium text-green-600 uppercase">Eventos en Cartelera</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['aprobados'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Actividades activas y aprobadas</p>
+            </div>
+            <!-- Card 4 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-blue-500">
+                <p class="text-xs font-medium text-blue-600 uppercase">Estudiantes Inscritos</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['total_inscritos'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Asientos reservados en total</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Espacio Eficiente -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 md:col-span-1 flex flex-col justify-between">
+                <div>
+                    <h4 class="text-sm font-bold text-gray-800 mb-1">Espacio Físico Más Demandado</h4>
+                    <p class="text-xs text-gray-400 mb-4">Ayuda a la toma de decisiones para distribución de recursos.</p>
+                    <div class="bg-slate-50 p-4 rounded-lg text-center border border-gray-100">
+                        <p class="text-xs text-slate-500 font-medium uppercase tracking-tight">Lugar Líder</p>
+                        <p class="text-base font-bold text-slate-900 mt-1">{{ stats['espacio_top'] }}</p>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-4">
+                    🔥 Ha albergado con éxito <span class="font-bold text-slate-900">{{ stats['espacio_top_usos'] }}</span> evento(s) aprobado(s).
+                </p>
+            </div>
+
+            <!-- Contexto Organizacional Informativo -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 md:col-span-2">
+                <h4 class="text-sm font-bold text-gray-800 mb-2">Estado del Sistema SGC-FaCyT</h4>
+                <div class="space-y-3 mt-4 text-xs text-gray-600">
+                    <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                        <span>Eventos Rechazados/Cancelados:</span>
+                        <span class="font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">{{ stats['cancelados'] }}</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                        <span>Lógica Antichoque de Horarios:</span>
+                        <span class="font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Activa (Previene colisiones)</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span>Control de Aforos:</span>
+                        <span class="font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Activo (Sincronizado con capacidad de aulas)</span>
+                    </div>
+                </div>
+                <div class="mt-6 bg-blue-50 border border-blue-100 p-3 rounded-lg text-[11px] text-blue-800">
+                    <strong>💡 Nota del Sistema:</strong> La acumulación de datos en este panel facilita a las autoridades la toma de decisiones estratégicas, permitiendo evaluar qué tipos de actividades académicas poseen mayor tracción estudiantil.
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-500 text-center py-4 text-xs border-t border-slate-800">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Cartelera de Eventos</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Cartelera de Actividades</h1>
+            <p class="text-xs text-blue-200">Inscríbete y participa en los eventos académicos de la FaCyT</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Contenido -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Si el usuario es Estudiante, se le muestra el botón de inscripción o el estado de su cupo -->
+        {% if session['rol'] == 'Estudiante' %}
+            {% if evento.id in inscritos_usuario %}
+                <button class="w-full bg-slate-100 text-slate-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
+                    ✓ Ya estás inscrito
+                </button>
+            {% elif evento.cupos_disponibles <= 0 %}
+                <button class="w-full bg-red-100 text-red-500 font-bold py-2 rounded-lg text-xs cursor-not-allowed" disabled>
+                    Agotado
+                </button>
+            {% else %}
+                <form action="{{ url_for('inscribir_en_evento', evento_id=evento.id) }}" method="POST">
+                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-xs transition shadow-sm">
+                        Inscribirme en este evento
+                    </button>
+                </form>
+            {% endif %}
+        {% endif %}
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% if eventos %}
+                {% for ev in eventos %}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    <div class="p-5">
+                        <div class="flex justify-between items-start mb-3">
+                            <span class="bg-blue-100 text-blue-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase">
+                                {{ ev.tipo_actividad }}
+                            </span>
+                            
+                            {% if ev.cupos_disponibles > 0 %}
+                                <span class="bg-green-100 text-green-800 font-medium text-[11px] px-2 py-0.5 rounded-full">
+                                    {{ ev.cupos_disponibles }} cupos libres
+                                </span>
+                            {% else %}
+                                <span class="bg-red-100 text-red-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase">
+                                    Agotado
+                                </span>
+                            {% endif %}
+                        </div>
+
+                        <h3 class="font-bold text-gray-900 text-base mb-2 line-clamp-2">{{ ev.titulo }}</h3>
+                        
+                        <div class="space-y-1.5 text-xs text-gray-600 border-t border-gray-100 pt-3 mt-3">
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Ubicación:</span>
+                                <span class="text-gray-900">{{ ev.espacio_nombre }}</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Fecha:</span>
+                                <span class="text-gray-900">{{ ev.fecha }}</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Horario:</span>
+                                <span class="text-gray-900">{{ ev.hora_inicio }} - {{ ev.hora_fin }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Barra de progreso visual de aforo -->
+                        <div class="mt-4">
+                            <div class="flex justify-between text-[11px] text-gray-500 mb-1">
+                                <span>Capacidad ocupada</span>
+                                <span>{{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }} asientos</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ ((ev.capacidad_max - ev.cupos_disponibles) / ev.capacidad_max * 100)|int }}%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-gray-50 border-t border-gray-100">
+                        {% if session.get('rol') == 'Estudiante' %}
+                            {% if ev.ya_inscrito > 0 %}
+                                <button disabled class="w-full bg-green-600 text-white font-semibold py-2 rounded-lg text-xs cursor-not-allowed flex items-center justify-center gap-1">
+                                    ✓ Ya estás inscrito
+                                </button>
+                            {% elif ev.cupos_disponibles <= 0 %}
+                                <button disabled class="w-full bg-gray-300 text-gray-500 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">
+                                    No hay asientos disponibles
+                                </button>
+                            {% else %}
+                                <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST">
+                                    <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-2 rounded-lg text-xs transition shadow-sm">
+                                        Reservar mi cupo
+                                    </button>
+                                </form>
+                            {% endif %}
+                        {% else %}
+                            <button disabled class="w-full bg-gray-200 text-gray-400 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">
+                                Inscripción (Solo Estudiantes)
+                            </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="col-span-full bg-white rounded-lg border border-gray-200 p-12 text-center">
+                    <p class="text-gray-400 italic text-sm">No hay eventos aprobados disponibles para inscripción en este momento.</p>
+                </div>
+            {% endif %}
+        </div>
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>
