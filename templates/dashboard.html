@@ -3,32 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SGC-FaCyT - Panel de Control</title>
+    <title>SGC-FaCyT - Panel Principal</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+<body class="bg-gray-50 min-h-screen flex flex-col justify-between">
 
-    <!-- Header / Navbar -->
-    <header class="bg-blue-950 text-white px-6 py-4 flex justify-between items-center shadow-md">
+    <!-- Navbar -->
+    <nav class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md">
         <div>
-            <h1 class="text-xl font-bold tracking-tight">SGC-FaCyT</h1>
-            <p class="text-xs text-blue-300">Sistema de Gestión de Cartelera — FaCyT UC</p>
+            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
+            <p class="text-xs text-slate-400">Sistema de Gestión de Cartelera • Versión 1-2026</p>
         </div>
         <div class="flex items-center gap-4">
-            <div class="text-right hidden sm:block">
-                <p class="text-sm font-semibold">{{ session.get('nombre') }}</p>
-                <span class="bg-blue-800 text-blue-100 font-bold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    {{ session.get('rol') }}
-                </span>
-            </div>
-            <a href="{{ url_for('logout') }}" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            <span class="text-xs bg-slate-850 px-3 py-1.5 rounded-lg border border-slate-700">
+                👤 <span class="font-semibold">{{ session['nombre'] }}</span> ({{ session['rol'] }})
+            </span>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition">
                 Cerrar Sesión
             </a>
         </div>
-    </header>
+    </nav>
 
     <!-- Contenido Principal -->
-    <main class="flex-grow p-6 max-w-4xl w-full mx-auto flex flex-col justify-center">
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
         
         <!-- Mensajes Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -41,80 +38,113 @@
             {% endif %}
         {% endwith %}
 
-        <!-- Bienvenida -->
-        <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8 text-center sm:text-left">
-            <h2 class="text-xl font-bold text-gray-900 mb-1">¡Hola de nuevo, {{ session.get('nombre') }}!</h2>
-            <p class="text-gray-600 text-sm">Desde aquí tienes acceso a las operaciones permitidas para tu perfil académico institucional.</p>
-        </div>
-
-        <!-- Módulos dinámicos por Rol -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <!-- BIENVENIDA -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">¡Bienvenido al Panel de Gestión!</h2>
+                <p class="text-sm text-gray-500 mt-1">Monitorea el estado de las actividades y la ocupación de espacios físicos de la facultad.</p>
+            </div>
             
-            <!-- SECCIÓN ADMINISTRADOR -->
-            {% if session.get('rol') == 'Admin' %}
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
-                    <div>
-                        <h3 class="font-bold text-gray-900 text-base mb-1">Solicitudes Pendientes</h3>
-                        <p class="text-gray-500 text-xs mb-4">Evalúa las actividades propuestas por los profesores, gestiona aulas y asigna espacios evitando colisiones de horario.</p>
-                    </div>
-                    <a href="{{ url_for('admin_pendientes') }}" class="bg-blue-950 hover:bg-blue-900 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
-                        Revisar Propuestas
+            <!-- Acciones según el Rol -->
+            <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                {% if session['rol'] == 'Admin' %}
+                    <a href="{{ url_for('admin_pendientes') }}" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📥 Revisar Solicitudes ({{ stats['pendientes'] }})
                     </a>
-                </div>
-
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
-                    <div>
-                        <h3 class="font-bold text-gray-900 text-base mb-1">Monitorear Cartelera Global</h3>
-                        <p class="text-gray-500 text-xs mb-4">Visualiza qué eventos están activos, audita los alumnos inscritos por actividad y procesa inscripciones manuales de estudiantes.</p>
-                    </div>
-                    <a href="{{ url_for('admin_cartelera') }}" class="bg-slate-800 hover:bg-slate-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
-                        Abrir Monitor e Inscribir
+                    <a href="{{ url_for('admin_cartelera') }}" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📊 Monitor General
                     </a>
-                </div>
-            {% endif %}
-
-            <!-- SECCIÓN PROFESOR / PROPONENTE -->
-            {% if session.get('rol') in ['Admin', 'Profesor'] %}
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
-                    <div>
-                        <h3 class="font-bold text-gray-900 text-base mb-1">Proponer Nueva Actividad</h3>
-                        <p class="text-gray-500 text-xs mb-4">Registra la planificación de tus eventos de extensión, congresos o talleres para someterlos a aprobación.</p>
-                    </div>
-                    <a href="{{ url_for('proponer_evento') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
-                        Crear Propuesta
+                {% endif %}
+                
+                {% if session['rol'] == 'Profesor' %}
+                    <a href="{{ url_for('proponer_evento') }}" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        ➕ Proponer Nueva Actividad
                     </a>
-                </div>
-
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
-                    <div>
-                        <h3 class="font-bold text-gray-900 text-base mb-1">Mis Actividades Propuestas</h3>
-                        <p class="text-gray-500 text-xs mb-4">Consulta el estado en tiempo real de tus solicitudes enviadas, modifica datos corregibles o elimina eventos cancelados.</p>
-                    </div>
-                    <a href="{{ url_for('ver_historial') }}" class="bg-gray-800 hover:bg-gray-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
-                        Ver Mi Historial
+                    <a href="{{ url_for('ver_historial') }}" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                        📂 Mis Propuestas
                     </a>
-                </div>
-            {% endif %}
-
-            <!-- SECCIÓN ESTUDIANTE -->
-            {% if session.get('rol') == 'Estudiante' %}
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition col-span-1 sm:col-span-2">
-                    <div>
-                        <h3 class="font-bold text-gray-900 text-base mb-1">Ver Cartelera de Actividades</h3>
-                        <p class="text-gray-500 text-xs mb-4">Explora todos los eventos científicos y académicos aprobados por la facultad, comprueba la disponibilidad de cupos en tiempo real e inscríbete para reservar tu asiento.</p>
-                    </div>
-                    <a href="{{ url_for('cartelera_eventos') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
-                        Explorar Cartelera de Eventos
-                    </a>
-                </div>
-            {% endif %}
-
+                {% endif %}
+                
+                <a href="{{ url_for('cartelera_eventos') }}" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg text-xs transition shadow-sm">
+                    📢 Ver Cartelera Pública
+                </a>
+            </div>
         </div>
+
+        <!-- SECCIÓN DE VISTA RESUMEN (Métricas Organizacionales) -->
+        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">Indicadores de Gestión de Eventos</h3>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <!-- Card 1 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                <p class="text-xs font-medium text-gray-400 uppercase">Total Eventos Registrados</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['total_eventos'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Historial acumulado en el ciclo</p>
+            </div>
+            <!-- Card 2 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-amber-500">
+                <p class="text-xs font-medium text-amber-600 uppercase">Eventos por Evaluar</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['pendientes'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Esperando resolución horaria</p>
+            </div>
+            <!-- Card 3 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
+                <p class="text-xs font-medium text-green-600 uppercase">Eventos en Cartelera</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['aprobados'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Actividades activas y aprobadas</p>
+            </div>
+            <!-- Card 4 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-blue-500">
+                <p class="text-xs font-medium text-blue-600 uppercase">Estudiantes Inscritos</p>
+                <p class="text-2xl font-bold text-gray-900 mt-2">{{ stats['total_inscritos'] }}</p>
+                <p class="text-[11px] text-gray-400 mt-1">Asientos reservados en total</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Espacio Eficiente -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 md:col-span-1 flex flex-col justify-between">
+                <div>
+                    <h4 class="text-sm font-bold text-gray-800 mb-1">Espacio Físico Más Demandado</h4>
+                    <p class="text-xs text-gray-400 mb-4">Ayuda a la toma de decisiones para distribución de recursos.</p>
+                    <div class="bg-slate-50 p-4 rounded-lg text-center border border-gray-100">
+                        <p class="text-xs text-slate-500 font-medium uppercase tracking-tight">Lugar Líder</p>
+                        <p class="text-base font-bold text-slate-900 mt-1">{{ stats['espacio_top'] }}</p>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-4">
+                    🔥 Ha albergado con éxito <span class="font-bold text-slate-900">{{ stats['espacio_top_usos'] }}</span> evento(s) aprobado(s).
+                </p>
+            </div>
+
+            <!-- Contexto Organizacional Informativo -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 md:col-span-2">
+                <h4 class="text-sm font-bold text-gray-800 mb-2">Estado del Sistema SGC-FaCyT</h4>
+                <div class="space-y-3 mt-4 text-xs text-gray-600">
+                    <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                        <span>Eventos Rechazados/Cancelados:</span>
+                        <span class="font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">{{ stats['cancelados'] }}</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                        <span>Lógica Antichoque de Horarios:</span>
+                        <span class="font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Activa (Previene colisiones)</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span>Control de Aforos:</span>
+                        <span class="font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Activo (Sincronizado con capacidad de aulas)</span>
+                    </div>
+                </div>
+                <div class="mt-6 bg-blue-50 border border-blue-100 p-3 rounded-lg text-[11px] text-blue-800">
+                    <strong>💡 Nota del Sistema:</strong> La acumulación de datos en este panel facilita a las autoridades la toma de decisiones estratégicas, permitiendo evaluar qué tipos de actividades académicas poseen mayor tracción estudiantil.
+                </div>
+            </div>
+        </div>
+
     </main>
 
     <!-- Footer -->
-    <footer class="bg-gray-900 text-gray-500 text-center py-4 text-xs border-t border-gray-800">
-        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) © 2026
+    <footer class="bg-slate-900 text-slate-500 text-center py-4 text-xs border-t border-slate-800">
+        Universidad de Carabobo — FaCyT 2026
     </footer>
 
 </body>

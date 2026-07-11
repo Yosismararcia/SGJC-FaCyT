@@ -106,7 +106,51 @@ def inicializar_base_de_datos():
 def home():
     inicializar_base_de_datos()
     if 'usuario_id' in session:
-        return render_template('dashboard.html')
+        conexion = obtener_conexion()
+        estadisticas = {}
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Total de eventos en el sistema
+                cursor.execute("SELECT COUNT(*) AS total FROM eventos;")
+                estadisticas['total_eventos'] = cursor.fetchone()['total']
+                
+                # 2. Eventos por estado
+                cursor.execute("""
+                    SELECT est.nombre, COUNT(e.id) AS conteo 
+                    FROM estados est 
+                    LEFT JOIN eventos e ON e.estado_id = est.id 
+                    GROUP BY est.id;
+                """)
+                por_estado = cursor.fetchall()
+                estadisticas['pendientes'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Propuesto'), 0)
+                estadisticas['aprobados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Aprobado'), 0)
+                estadisticas['cancelados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Cancelado'), 0)
+                
+                # 3. Espacio más utilizado
+                cursor.execute("""
+                    SELECT esp.nombre, COUNT(e.id) AS usos 
+                    FROM espacios esp 
+                    JOIN eventos e ON e.espacio_id = esp.id 
+                    WHERE e.estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
+                    GROUP BY esp.id 
+                    ORDER BY usos DESC 
+                    LIMIT 1;
+                """)
+                mas_utilizado = cursor.fetchone()
+                estadisticas['espacio_top'] = mas_utilizado['nombre'] if mas_utilizado else "Ninguno aún"
+                estadisticas['espacio_top_usos'] = mas_utilizado['usos'] if mas_utilizado else 0
+
+                # 4. Total de inscripciones realizadas (Estudiantes comprometidos)
+                cursor.execute("SELECT COUNT(*) AS total FROM inscripciones;")
+                estadisticas['total_inscritos'] = cursor.fetchone()['total']
+                
+        except Exception as e:
+            print(f"Error al calcular estadísticas: {str(e)}")
+            estadisticas = {'total_eventos': 0, 'pendientes': 0, 'aprobados': 0, 'cancelados': 0, 'espacio_top': 'Error', 'espacio_top_usos': 0, 'total_inscritos': 0}
+        finally:
+            conexion.close()
+            
+        return render_template('dashboard.html', stats=estadisticas)
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
