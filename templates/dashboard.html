@@ -3,33 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SGC-FaCyT - Panel Principal</title>
+    <title>SGC-FaCyT - Panel de Control</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col">
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
 
-    <!-- Barra de Navegación Superior -->
-    <nav class="bg-blue-900 text-white shadow-md px-6 py-4 flex justify-between items-center">
+    <!-- Header / Navbar -->
+    <header class="bg-blue-950 text-white px-6 py-4 flex justify-between items-center shadow-md">
         <div>
-            <h1 class="text-xl font-bold tracking-wide">SGC-FaCyT</h1>
-            <p class="text-xs text-blue-200">Sistema de Gestión de Eventos</p>
+            <h1 class="text-xl font-bold tracking-tight">SGC-FaCyT</h1>
+            <p class="text-xs text-blue-300">Sistema de Gestión de Cartelera — FaCyT UC</p>
         </div>
-        <div class="flex items-center space-x-4">
-            <div class="text-right">
-                <p class="text-sm font-semibold">{{ session['nombre'] }}</p>
-                <span class="inline-block bg-blue-800 text-xs px-2 py-0.5 rounded-full border border-blue-600 font-medium text-blue-200">
-                    {{ session['rol'] }}
+        <div class="flex items-center gap-4">
+            <div class="text-right hidden sm:block">
+                <p class="text-sm font-semibold">{{ session.get('nombre') }}</p>
+                <span class="bg-blue-800 text-blue-100 font-bold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    {{ session.get('rol') }}
                 </span>
             </div>
-            <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition">
+            <a href="{{ url_for('logout') }}" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
                 Cerrar Sesión
             </a>
         </div>
-    </nav>
+    </header>
 
     <!-- Contenido Principal -->
     <main class="flex-grow p-6 max-w-4xl w-full mx-auto flex flex-col justify-center">
         
+        <!-- Mensajes Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -40,61 +41,80 @@
             {% endif %}
         {% endwith %}
 
-        <div class="text-center mb-8">
-            <h2 class="text-2xl font-bold text-gray-800">¡Bienvenido al Panel de Control!</h2>
-            <p class="text-gray-500 text-sm mt-1">Selecciona la operación académica que deseas gestionar hoy</p>
+        <!-- Bienvenida -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8 text-center sm:text-left">
+            <h2 class="text-xl font-bold text-gray-900 mb-1">¡Hola de nuevo, {{ session.get('nombre') }}!</h2>
+            <p class="text-gray-600 text-sm">Desde aquí tienes acceso a las operaciones permitidas para tu perfil académico institucional.</p>
         </div>
 
-        <!-- Módulo del Administrador -->
-        {% if session.get('rol') == 'Admin' %}
-        <div class="bg-purple-50 border border-purple-200 rounded-xl p-5 mb-6 shadow-sm">
-            <h3 class="text-purple-900 font-bold text-sm uppercase tracking-wider mb-3">Panel de Control Administrativo</h3>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <a href="{{ url_for('admin_pendientes') }}" class="bg-purple-700 hover:bg-purple-800 text-white p-4 rounded-lg text-center transition shadow flex flex-col justify-center items-center group">
-                    <span class="font-bold text-sm group-hover:underline">Revisar Solicitudes Pendientes</span>
-                    <span class="text-[11px] text-purple-200 mt-0.5">Asignar espacios y gestionar horarios</span>
-                </a>
-                <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:bg-gray-50 text-purple-900 border border-purple-300 p-4 rounded-lg text-center transition flex flex-col justify-center items-center">
-                    <span class="font-bold text-sm">Monitorear Cartelera Global</span>
-                    <span class="text-[11px] text-gray-500 mt-0.5">Ver control de aforos e inscritos</span>
-                </a>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Módulo de Profesores y Estudiantes -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Módulos dinámicos por Rol -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
             
-            <a href="{{ url_for('proponer_evento') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
-                <div>
-                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Proponer Actividad</h4>
-                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Solicita un aula, laboratorio o el auditorio de la FaCyT para organizar un evento.</p>
+            <!-- SECCIÓN ADMINISTRADOR -->
+            {% if session.get('rol') == 'Admin' %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Solicitudes Pendientes</h3>
+                        <p class="text-gray-500 text-xs mb-4">Evalúa las actividades propuestas por los profesores, gestiona aulas y asigna espacios evitando colisiones de horario.</p>
+                    </div>
+                    <a href="{{ url_for('admin_pendientes') }}" class="bg-blue-950 hover:bg-blue-900 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Revisar Propuestas
+                    </a>
                 </div>
-                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ir al formulario →</span>
-            </a>
 
-            <a href="{{ url_for('ver_historial') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
-                <div>
-                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Mis Eventos</h4>
-                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta el estatus de revisión de tus propuestas, edítalas o revisa tus espacios asignados.</p>
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Monitorear Cartelera Global</h3>
+                        <p class="text-gray-500 text-xs mb-4">Visualiza qué eventos están activos, audita los alumnos inscritos por actividad y procesa inscripciones manuales de estudiantes.</p>
+                    </div>
+                    <a href="{{ url_for('admin_cartelera') }}" class="bg-slate-800 hover:bg-slate-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Abrir Monitor e Inscribir
+                    </a>
                 </div>
-                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver historial →</span>
-            </a>
+            {% endif %}
 
-            <a href="{{ url_for('cartelera_eventos') }}" class="bg-white hover:border-blue-900 border border-gray-200 rounded-xl p-5 shadow-sm transition flex flex-col justify-between group">
-                <div>
-                    <h4 class="font-bold text-gray-800 text-base group-hover:text-blue-900 transition">Cartelera de Eventos</h4>
-                    <p class="text-gray-500 text-xs mt-2 leading-relaxed">Consulta las actividades confirmadas de la facultad e inscríbete para asegurar tu cupo.</p>
+            <!-- SECCIÓN PROFESOR / PROPONENTE -->
+            {% if session.get('rol') in ['Admin', 'Profesor'] %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Proponer Nueva Actividad</h3>
+                        <p class="text-gray-500 text-xs mb-4">Registra la planificación de tus eventos de extensión, congresos o talleres para someterlos a aprobación.</p>
+                    </div>
+                    <a href="{{ url_for('proponer_evento') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Crear Propuesta
+                    </a>
                 </div>
-                <span class="text-blue-900 text-xs font-bold mt-4 inline-block group-hover:underline">Ver cartelera →</span>
-            </a>
+
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Mis Actividades Propuestas</h3>
+                        <p class="text-gray-500 text-xs mb-4">Consulta el estado en tiempo real de tus solicitudes enviadas, modifica datos corregibles o elimina eventos cancelados.</p>
+                    </div>
+                    <a href="{{ url_for('ver_historial') }}" class="bg-gray-800 hover:bg-gray-700 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Ver Mi Historial
+                    </a>
+                </div>
+            {% endif %}
+
+            <!-- SECCIÓN ESTUDIANTE -->
+            {% if session.get('rol') == 'Estudiante' %}
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between hover:shadow-md transition col-span-1 sm:col-span-2">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-base mb-1">Ver Cartelera de Actividades</h3>
+                        <p class="text-gray-500 text-xs mb-4">Explora todos los eventos científicos y académicos aprobados por la facultad, comprueba la disponibilidad de cupos en tiempo real e inscríbete para reservar tu asiento.</p>
+                    </div>
+                    <a href="{{ url_for('cartelera_eventos') }}" class="bg-blue-900 hover:bg-blue-800 text-white text-center py-2 rounded-lg font-semibold text-xs transition shadow-sm">
+                        Explorar Cartelera de Eventos
+                    </a>
+                </div>
+            {% endif %}
 
         </div>
-
     </main>
 
-    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs border-t border-gray-700">
-        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) 2026
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-gray-500 text-center py-4 text-xs border-t border-gray-800">
+        Universidad de Carabobo — Facultad de Ciencias y Tecnología (FaCyT) © 2026
     </footer>
 
 </body>

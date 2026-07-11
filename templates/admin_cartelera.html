@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGC-FaCyT - Monitor de Cartelera</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Navbar -->
+    <nav class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow">
+        <div>
+            <h1 class="text-lg font-bold tracking-wide">Monitor Global de Cartelera</h1>
+            <p class="text-xs text-slate-400">Panel de Control de Asistencia e Inscripciones Manuales</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            Volver al Panel
+        </a>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="flex-grow p-6 max-w-6xl w-full mx-auto">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-6 p-3 rounded text-sm {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="space-y-8">
+            {% if eventos %}
+                {% for ev in eventos %}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden grid grid-cols-1 lg:grid-cols-3">
+                    
+                    <!-- Información General del Evento -->
+                    <div class="p-6 bg-slate-50 border-r border-gray-100 flex flex-col justify-between">
+                        <div>
+                            <span class="bg-slate-200 text-slate-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase">
+                                {{ ev.tipo_actividad }}
+                            </span>
+                            <h3 class="font-bold text-gray-900 text-base mt-2 mb-3">{{ ev.titulo }}</h3>
+                            
+                            <div class="space-y-1.5 text-xs text-gray-600">
+                                <p><span class="font-semibold text-gray-700">Ubicación:</span> {{ ev.espacio_nombre }}</p>
+                                <p><span class="font-semibold text-gray-700">Capacidad Total:</span> {{ ev.capacidad_max }} asientos</p>
+                                <p><span class="font-semibold text-gray-700">Cupos Libres:</span> <span class="font-bold text-blue-600">{{ ev.cupos_disponibles }}</span></p>
+                                <p><span class="font-semibold text-gray-700">Fecha y Hora:</span> {{ ev.fecha }} | {{ ev.hora_inicio }} - {{ ev.hora_fin }}</p>
+                            </div>
+                        </div>
+
+                        <!-- Formulario de Inscripción Manual -->
+                        <div class="mt-6 border-t border-gray-200 pt-4">
+                            <h4 class="text-xs font-bold text-gray-700 uppercase mb-2">Inscripción Manual de Alumno</h4>
+                            <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST" class="flex gap-2">
+                                <input type="text" name="cedula_estudiante" placeholder="Cédula del estudiante" required
+                                       class="bg-white border border-gray-300 rounded px-2 py-1 text-xs flex-grow focus:outline-none focus:border-slate-900">
+                                <button type="submit" class="bg-blue-900 hover:bg-blue-800 text-white font-semibold px-3 py-1 rounded text-xs transition">
+                                    Inscribir
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Lista de Alumnos Inscritos -->
+                    <div class="p-6 lg:col-span-2 flex flex-col justify-between">
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Estudiantes Registrados ({{ ev.inscritos|length }})</h4>
+                            
+                            {% if ev.inscritos %}
+                            <div class="max-h-40 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-100">
+                                {% for alumno in ev.inscritos %}
+                                <div class="p-2.5 flex justify-between items-center text-xs hover:bg-gray-50 transition">
+                                    <div>
+                                        <p class="font-semibold text-gray-900">{{ alumno.nombre_completo }}</p>
+                                        <p class="text-gray-500 text-[11px]">C.I: {{ alumno.cedula }} | {{ alumno.correo }}</p>
+                                    </div>
+                                    <span class="text-gray-400 text-[10px] italic">
+                                        {{ str(alumno.fecha_inscripcion)[:16] if alumno.fecha_inscripcion else 'Manual' }}
+                                    </span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="border border-dashed border-gray-200 rounded-lg p-6 text-center text-gray-400 italic text-xs">
+                                No hay estudiantes inscritos en esta actividad todavía.
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="bg-white rounded-lg border border-gray-200 p-12 text-center">
+                    <p class="text-gray-400 italic text-sm">No hay actividades aprobadas en la cartelera general en este momento.</p>
+                </div>
+            {% endif %}
+        </div>
+    </main>
+
+    <footer class="bg-slate-900 text-slate-500 text-center py-4 text-xs border-t border-slate-800">
+        Universidad de Carabobo — FaCyT 2026
+    </footer>
+
+</body>
+</html>

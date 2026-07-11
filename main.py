@@ -7,7 +7,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')  # Cambia esto por una clave secreta segura en producción
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
+
 def obtener_conexion():
     return pymysql.connect(
         host=os.getenv('DB_HOST'),
@@ -28,15 +29,52 @@ def inicializar_base_de_datos():
             cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
             cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
             cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
-            cursor.execute("CREATE TABLE IF NOT EXISTS eventos (id INT AUTO_INCREMENT PRIMARY KEY, titulo VARCHAR(150) NOT NULL, tipo_actividad VARCHAR(50) NOT NULL, fecha DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fin TIME NOT NULL, estado_id INT NOT NULL, espacio_id INT NULL, creador_id INT NOT NULL, FOREIGN KEY (estado_id) REFERENCES estados(id), FOREIGN KEY (espacio_id) REFERENCES espacios(id), FOREIGN KEY (creador_id) REFERENCES usuarios(id));")
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eventos (
+                    id INT AUTO_INCREMENT PRIMARY KEY, 
+                    titulo VARCHAR(150) NOT NULL, 
+                    tipo_actividad VARCHAR(50) NOT NULL, 
+                    fecha DATE NOT NULL, 
+                    hora_inicio TIME NOT NULL, 
+                    hora_fin TIME NOT NULL, 
+                    estado_id INT NOT NULL, 
+                    espacio_id INT NULL, 
+                    creador_id INT NOT NULL,
+                    cupos_disponibles INT NULL,
+                    FOREIGN KEY (estado_id) REFERENCES estados(id), 
+                    FOREIGN KEY (espacio_id) REFERENCES espacios(id), 
+                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
+                );
+            """)
 
-            if cursor.execute("SELECT COUNT(*) AS total FROM roles;") and cursor.fetchone()['total'] == 0:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inscripciones (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    usuario_id INT NOT NULL,
+                    evento_id INT NOT NULL,
+                    fecha_inscripcion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY un_registro (usuario_id, evento_id),
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
+                );
+            """)
+
+            try:
+                cursor.execute("ALTER TABLE eventos ADD COLUMN cupos_disponibles INT NULL;")
+            except:
+                pass
+
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
 
-            if cursor.execute("SELECT COUNT(*) AS total FROM estados;") and cursor.fetchone()['total'] == 0:
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
 
-            if cursor.execute("SELECT COUNT(*) AS total FROM espacios;") and cursor.fetchone()['total'] == 0:
+            cursor.execute("SELECT COUNT(*) AS total FROM espacios;")
+            if cursor.fetchone()['total'] == 0:
                 espacios_facyt = [
                     ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
                     ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
@@ -59,6 +97,8 @@ def inicializar_base_de_datos():
                 cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
             
             conexion.commit()
+    except Exception as e:
+        print(f"Error al inicializar base de datos: {str(e)}")
     finally:
         conexion.close()
 
@@ -177,7 +217,7 @@ def ver_historial():
             with conexion.cursor() as cursor:
                 sql = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre
+                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre, e.cupos_disponibles
                     FROM eventos e
                     JOIN estados est ON e.estado_id = est.id
                     LEFT JOIN espacios esp ON e.espacio_id = esp.id
@@ -190,6 +230,8 @@ def ver_historial():
                     ev['fecha'] = str(ev['fecha'])
                     ev['hora_inicio'] = str(ev['hora_inicio'])
                     ev['hora_fin'] = str(ev['hora_fin'])
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = 0
         except Exception as e:
             flash(f'Error al cargar el historial: {str(e)}', 'error')
         finally:
@@ -203,7 +245,6 @@ def editar_evento(evento_id):
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # Verificar pertenencia y estado (Solo se editan si están 'Propuestos')
                 cursor.execute("""
                     SELECT e.*, est.nombre AS estado_nombre 
                     FROM eventos e 
@@ -236,7 +277,6 @@ def editar_evento(evento_id):
                     flash('Propuesta actualizada correctamente.', 'success')
                     return redirect(url_for('ver_historial'))
 
-                # Formatear datos para el HTML
                 evento['fecha'] = str(evento['fecha'])
                 evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
                 evento['hora_fin'] = str(evento['hora_fin'])[:5]
@@ -251,7 +291,6 @@ def eliminar_evento(evento_id):
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # Comprobar seguridad antes de borrar
                 cursor.execute("""
                     SELECT e.*, est.nombre AS estado_nombre 
                     FROM eventos e 
@@ -266,6 +305,8 @@ def eliminar_evento(evento_id):
                     flash('La propuesta ha sido eliminada permanentemente.', 'success')
                 else:
                     flash('No puedes eliminar este evento.', 'error')
+        except Exception as e:
+            flash(f'Error al eliminar el evento: {str(e)}', 'error')
         finally:
             conexion.close()
         return redirect(url_for('ver_historial'))
@@ -297,6 +338,8 @@ def admin_pendientes():
 
                 cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
                 espacios = cursor.fetchall()
+        except Exception as e:
+            flash(f'Error al cargar solicitudes administrativas: {str(e)}', 'error')
         finally:
             conexion.close()
         return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
@@ -311,19 +354,192 @@ def procesar_solicitud(evento_id):
         try:
             with conexion.cursor() as cursor:
                 if accion == 'aprobar':
+                    cursor.execute("SELECT fecha, hora_inicio, hora_fin FROM eventos WHERE id = %s;", (evento_id,))
+                    ev_actual = cursor.fetchone()
+                    
+                    sql_choque = """
+                        SELECT id, titulo FROM eventos 
+                        WHERE espacio_id = %s AND fecha = %s AND estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
+                        AND ((hora_inicio < %s AND hora_fin > %s) OR (hora_inicio < %s AND hora_fin > %s) OR (hora_inicio >= %s AND hora_fin <= %s));
+                    """
+                    cursor.execute(sql_choque, (espacio_id, ev_actual['fecha'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_inicio'], ev_actual['hora_fin']))
+                    choque = cursor.fetchone()
+                    
+                    if choque:
+                        flash(f'¡CHOQUE DE HORARIO! El espacio ya está ocupado por: "{choque["titulo"]}". Selecciona otro espacio u horario.', 'error')
+                        return redirect(url_for('admin_pendientes'))
+
+                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (espacio_id,))
+                    capacidad_max = cursor.fetchone()['capacidad']
+
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
                     estado_id = cursor.fetchone()['id']
-                    cursor.execute("UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;", (estado_id, espacio_id, evento_id))
-                    flash('Evento aprobado correctamente con espacio asignado.', 'success')
+                    
+                    cursor.execute("""
+                        UPDATE eventos 
+                        SET estado_id = %s, espacio_id = %s, cupos_disponibles = %s 
+                        WHERE id = %s;
+                    """, (estado_id, espacio_id, capacidad_max, evento_id))
+                    flash('Evento aprobado correctamente. Cupos inicializados según la capacidad del aula.', 'success')
+                    
                 elif accion == 'cancelar':
                     cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
                     estado_id = cursor.fetchone()['id']
                     cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
                     flash('Propuesta rechazada y cancelada con éxito.', 'success')
                 conexion.commit()
+        except Exception as e:
+            flash(f'Error en el servidor al procesar la solicitud: {str(e)}', 'error')
         finally:
             conexion.close()
         return redirect(url_for('admin_pendientes'))
+    return redirect(url_for('login'))
+
+@app.route('/cartelera')
+def cartelera_eventos():
+    if 'usuario_id' in session:
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
+                           (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE est.nombre = 'Aprobado'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql, (session['usuario_id'],))
+                eventos = cursor.fetchall()
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
+                    
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = ev['capacidad_max']
+                    
+                    if ev['capacidad_max'] and ev['capacidad_max'] > 0:
+                        ocupados = ev['capacidad_max'] - ev['cupos_disponibles']
+                        ev['porcentaje_ocupacion'] = int((ocupados / ev['capacidad_max']) * 100)
+                    else:
+                        ev['porcentaje_ocupacion'] = 0
+        except Exception as e:
+            flash(f'Error al acceder a la cartelera: {str(e)}', 'error')
+            return redirect(url_for('home'))
+        finally:
+            conexion.close()
+        return render_template('cartelera.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+@app.route('/admin/cartelera')
+def admin_cartelera():
+    if 'usuario_id' in session and session.get('rol') == 'Admin':
+        conexion = obtener_conexion()
+        eventos = []
+        try:
+            with conexion.cursor() as cursor:
+                sql = """
+                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max
+                    FROM eventos e
+                    JOIN estados est ON e.estado_id = est.id
+                    JOIN espacios esp ON e.espacio_id = esp.id
+                    WHERE est.nombre = 'Aprobado'
+                    ORDER BY e.fecha ASC;
+                """
+                cursor.execute(sql)
+                eventos = cursor.fetchall()
+                for ev in eventos:
+                    ev['fecha'] = str(ev['fecha'])
+                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
+                    if ev['cupos_disponibles'] is None:
+                        ev['cupos_disponibles'] = ev['capacidad_max']
+                    
+                    # Cargar lista de estudiantes inscritos en este evento concreto
+                    sql_alumnos = """
+                        SELECT u.nombre_completo, u.cedula, u.correo, i.fecha_inscripcion 
+                        FROM inscripciones i
+                        JOIN usuarios u ON i.usuario_id = u.id
+                        WHERE i.evento_id = %s
+                        ORDER BY i.fecha_inscripcion ASC;
+                    """
+                    cursor.execute(sql_alumnos, (ev['id'],))
+                    ev['inscritos'] = cursor.fetchall()
+        except Exception as e:
+            flash(f'Error al cargar el monitor administrativo: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return render_template('admin_cartelera.html', eventos=eventos)
+    return redirect(url_for('login'))
+
+@app.route('/inscribir/<int:evento_id>', methods=['POST'])
+def inscribir_en_evento():
+    if 'usuario_id' in session:
+        rol_actual = session.get('rol')
+        target_usuario_id = None
+        
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Determinar quién se está inscribiendo
+                if rol_actual == 'Admin':
+                    cedula_estudiante = request.form.get('cedula_estudiante', '').strip()
+                    if not cedula_estudiante:
+                        flash('Error: Debes ingresar la cédula del estudiante.', 'error')
+                        return redirect(url_for('admin_cartelera'))
+                    
+                    # Verificar si la cédula pertenece a un estudiante registrado
+                    cursor.execute("""
+                        SELECT u.id FROM usuarios u 
+                        JOIN roles r ON u.role_id = r.id 
+                        WHERE u.cedula = %s AND r.nombre = 'Estudiante';
+                    """, (cedula_estudiante,))
+                    estudiante = cursor.fetchone()
+                    if not estudiante:
+                        flash('Error: No se encontró ningún estudiante registrado con esa cédula.', 'error')
+                        return redirect(url_for('admin_cartelera'))
+                    target_usuario_id = estudiante['id']
+                elif rol_actual == 'Estudiante':
+                    target_usuario_id = session['usuario_id']
+                else:
+                    flash('Tu rol actual no te permite realizar inscripciones.', 'error')
+                    return redirect(url_for('cartelera_eventos'))
+
+                # 2. Verificar disponibilidad del evento
+                cursor.execute("SELECT cupos_disponibles, espacio_id FROM eventos WHERE id = %s FOR UPDATE;", (evento_id,))
+                evento = cursor.fetchone()
+                
+                if not evento:
+                    flash('El evento seleccionado ya no está disponible.', 'error')
+                    return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
+                
+                actual_cupos = evento['cupos_disponibles']
+                if actual_cupos is None:
+                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (evento['espacio_id'],))
+                    actual_cupos = cursor.fetchone()['capacidad']
+                
+                if actual_cupos <= 0:
+                    flash('Lo sentimos, ya no quedan cupos disponibles para esta actividad.', 'error')
+                    return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
+                
+                try:
+                    cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (target_usuario_id, evento_id))
+                    cursor.execute("UPDATE eventos SET cupos_disponibles = %s - 1 WHERE id = %s;", (actual_cupos, evento_id))
+                    conexion.commit()
+                    flash('¡Inscripción procesada con éxito!', 'success')
+                except pymysql.err.IntegrityError:
+                    flash('El estudiante ya se encuentra registrado en esta actividad.', 'error')
+        except Exception as e:
+            flash(f'Error en el proceso de inscripción: {str(e)}', 'error')
+        finally:
+            conexion.close()
+            
+        return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
     return redirect(url_for('login'))
 
 @app.route('/logout')
