@@ -41,18 +41,27 @@
                     
                     <!-- Cuerpo de la Tarjeta -->
                     <div class="p-5">
-                        <div class="flex justify-between items-start mb-3">
-                            <span class="bg-blue-100 text-blue-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase">
+                        <div class="flex justify-between items-start mb-3 gap-2">
+                            <span class="bg-blue-100 text-blue-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase whitespace-nowrap">
                                 {{ ev.tipo_actividad }}
                             </span>
                             
-                            {% if ev.cupos_disponibles > 0 %}
-                                <span class="bg-green-100 text-green-800 font-medium text-[11px] px-2 py-0.5 rounded-full">
-                                    {{ ev.cupos_disponibles }} cupos libres
+                            <!-- Semáforo de Estados Dinámicos -->
+                            {% if ev.estado == 'Aprobado' %}
+                                <span class="bg-green-100 text-green-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap">
+                                    🟢 Aprobado
+                                </span>
+                            {% elif ev.estado == 'Realizado' %}
+                                <span class="bg-purple-100 text-purple-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap">
+                                    🏁 Realizado
+                                </span>
+                            {% elif ev.estado == 'Cancelado' %}
+                                <span class="bg-red-100 text-red-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap animate-pulse">
+                                    🚨 Cancelado
                                 </span>
                             {% else %}
-                                <span class="bg-red-100 text-red-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase">
-                                    Agotado
+                                <span class="bg-gray-100 text-gray-800 font-medium text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                    {{ ev.cupos_disponibles }} cupos
                                 </span>
                             {% endif %}
                         </div>
@@ -74,58 +83,83 @@
                             </div>
                         </div>
 
-                        <!-- Barra de progreso visual de aforo -->
+                        <!-- Barra de progreso corregida -->
                         <div class="mt-4">
                             <div class="flex justify-between text-[11px] text-gray-500 mb-1">
-                                <span>Capacidad ocupada:</span>
-                                <span>{{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }} asientos</span>
+                                <span>Capacidad: {{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }}</span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
                                 {% set ocupados = ev.capacidad_max - ev.cupos_disponibles %}
-                                {% set porcentaje = ((ocupados / ev.capacidad_max) * 100) | int %}
-                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ porcentaje }}%"></div>
+                                {% set pct = ((ocupados / ev.capacidad_max) * 100) | int %}
+                                <div class="bg-blue-600 h-1.5 rounded-full" style="width: {{ pct }}%;"></div>
                             </div>
                         </div>
-                    </div> <!-- Cierre correcto del p-5 -->
+                    </div>
 
-                    <!-- Sección de Acción inferior -->
+                    <!-- Sección de Acción inferior Inteligente -->
                     <div class="p-4 bg-gray-50 border-t border-gray-100">
                         {% if session.get('rol') == 'Estudiante' %}
-                            {% if ev.ya_inscrito > 0 %}
-                                <button disabled class="w-full bg-green-600 text-white font-semibold py-2 rounded-lg text-xs cursor-not-allowed flex items-center justify-center gap-1">
-                                    ✓ Ya estás inscrito
-                                </button>
-                            {% elif ev.cupos_disponibles <= 0 %}
-                                <button disabled class="w-full bg-gray-300 text-gray-500 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">
-                                    No hay asientos disponibles
-                                </button>
+                            {% if ev.estado == 'Realizado' %}
+                                <button disabled class="w-full bg-purple-50 text-purple-600 font-semibold py-2 rounded-lg text-xs cursor-not-allowed border border-purple-200">Finalizado</button>
+                            {% elif ev.estado == 'Cancelado' %}
+                                <button disabled class="w-full bg-red-50 text-red-600 font-semibold py-2 rounded-lg text-xs cursor-not-allowed border border-red-200">Suspendido</button>
                             {% else %}
-                                <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST">
-                                    <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-2 rounded-lg text-xs transition shadow-sm">
-                                        Reservar mi cupo
-                                    </button>
-                                </form>
+                                {% if ev.ya_inscrito > 0 %}
+                                    <button disabled class="w-full bg-green-600 text-white font-semibold py-2 rounded-lg text-xs cursor-not-allowed">✓ Ya inscrito</button>
+                                {% elif ev.cupos_disponibles <= 0 %}
+                                    <button disabled class="w-full bg-gray-300 text-gray-500 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">Sin cupos</button>
+                                {% else %}
+                                    <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST">
+                                        <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-2 rounded-lg text-xs transition">Reservar</button>
+                                    </form>
+                                {% endif %}
                             {% endif %}
                         {% else %}
-                            <button disabled class="w-full bg-gray-200 text-gray-400 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">
-                                Inscripción (Solo Estudiantes)
-                            </button>
+                            <!-- CONTROL DE ESTADOS Y PURGA PARA EL ADMINISTRADOR -->
+                            <form action="{{ url_for('cambiar_estado', evento_id=ev.id) }}" method="POST" class="space-y-3 pt-1">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-gray-600 uppercase mb-1">Cambiar Estado:</label>
+                                    <select name="estado" id="estado_select_{{ ev.id }}" onchange="evaluarEstado(this, '{{ ev.id }}')" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-blue-500">
+                                        <option value="Solicitado" {% if ev.estado == 'Solicitado' %}selected{% endif %}>📄 Solicitado</option>
+                                        <option value="En Revisión" {% if ev.estado == 'En Revisión' %}selected{% endif %}>🔍 En Revisión</option>
+                                        <option value="Aprobado" {% if ev.estado == 'Aprobado' %}selected{% endif %}>🟢 Aprobado</option>
+                                        <option value="Realizado" {% if ev.estado == 'Realizado' %}selected{% endif %}>🏁 Realizado</option>
+                                        <option value="Cancelado" {% if ev.estado == 'Cancelado' %}selected{% endif %}>🚨 Cancelado</option>
+                                        <option value="Rechazado" {% if ev.estado == 'Rechazado' %}selected{% endif %}>❌ Rechazado</option>
+                                    </select>
+                                </div>
+
+                                <div id="contenedor_purga_{{ ev.id }}" class="{% if ev.estado != 'Realizado' %}hidden{% endif %} flex items-center justify-between gap-1 bg-white p-1.5 rounded border border-gray-200">
+                                    <span class="text-[10px] text-gray-500 font-semibold">Días en cartelera:</span>
+                                    <input type="number" name="dias_purga" value="3" min="0" max="30" class="w-14 border border-gray-300 rounded text-center text-xs p-0.5">
+                                </div>
+
+                                <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white text-[11px] font-bold py-1.5 rounded transition shadow-sm">
+                                    Actualizar Estado
+                                </button>
+                            </form>
                         {% endif %}
                     </div>
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="col-span-full bg-white rounded-lg border border-gray-200 p-12 text-center">
-                    <p class="text-gray-400 italic text-sm">No hay eventos aprobados disponibles para inscripción en este momento.</p>
-                </div>
+                <div class="col-span-full text-center p-8 text-gray-400 italic text-sm">No hay eventos registrados en esta sección.</div>
             {% endif %}
         </div>
+
+        <script>
+            function evaluarEstado(selectElement, id) {
+                const contenedorPurga = document.getElementById('contenedor_purga_' + id);
+                if (selectElement.value === 'Realizado') {
+                    contenedorPurga.classList.remove('hidden');
+                } else {
+                    contenedorPurga.classList.add('hidden');
+                }
+            }
+        </script>
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">
-        Universidad de Carabobo — FaCyT 2026
-    </footer>
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 text-xs">Universidad de Carabobo — FaCyT 2026</footer>
 
 </body>
 </html>

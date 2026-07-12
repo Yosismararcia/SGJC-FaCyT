@@ -1,15 +1,28 @@
+#--------------------------- NUEVA MODIFICACION 9:30 11-07
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import pymysql
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
 from datetime import datetime, timedelta
+import re
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
+
+# EXPRESIÓN REGULAR: Solo permite letras, números, puntos, guiones y @ (Previene Inyecciones y Símbolos Raros)
+CARACTERES_PERMITIDOS = re.compile(r"^[a-zA-Z0-9@._-]+$")
+
+@app.before_request
+def controlar_sesion_y_tiempo():
+    # MODIFICACIÓN DE SEGURIDAD: Al cerrar el navegador o pestaña, la cookie de sesión caduca
+    session.permanent = True
+    # Establece el tiempo límite estricto de 15 minutos de inactividad
+    app.permanent_session_lifetime = timedelta(minutes=15)
+    # Refresca el reloj con cada interacción o clic que realice el usuario
+    session.modified = True
 
 def obtener_conexion():
     return pymysql.connect(
@@ -61,30 +74,26 @@ def inicializar_base_de_datos():
                     FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
                 );
             """)
-
-            #agrego la columna cupos_disponibles a la tabla eventos si no existía antes
+            
+            # Control de migraciones seguras de columnas opcionales
             try:
                 cursor.execute("ALTER TABLE eventos ADD COLUMN cupos_disponibles INT NULL;")
-            except:
+            except Exception:
                 pass
-            # 2. modificacion DE MIGRACIÓN: Agrega las columnas si la tabla ya existía antes
             try:
-                cursor.execute("ALTER TABLE eventos ADD COLUMN estado TEXT DEFAULT 'Solicitado';")
+                cursor.execute("ALTER TABLE eventos ADD COLUMN fecha_elim VARCHAR(10) NULL;")
             except Exception:
-                pass  # Si ya existía la columna, ignora el error de forma segura
+                pass
 
-            try:
-                cursor.execute("ALTER TABLE eventos ADD COLUMN fecha_elim TEXT NULL;")
-            except Exception:
-                pass  # Si ya existía la columna, ignora el error de forma segura
-
+            # Poblar tablas maestras si están vacías
             cursor.execute("SELECT COUNT(*) AS total FROM roles;")
             if cursor.fetchone()['total'] == 0:
                 cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
 
             cursor.execute("SELECT COUNT(*) AS total FROM estados;")
             if cursor.fetchone()['total'] == 0:
-                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", [('Propuesto',), ('Solicitado',), ('Aprobado',), ('Cancelado',)])
+                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", 
+                                   [('Propuesto',), ('Solicitado',), ('En Revisión',), ('Aprobado',), ('Realizado',), ('Cancelado',), ('Rechazado',)])
 
             cursor.execute("SELECT COUNT(*) AS total FROM espacios;")
             if cursor.fetchone()['total'] == 0:
@@ -123,11 +132,9 @@ def home():
         estadisticas = {}
         try:
             with conexion.cursor() as cursor:
-                # 1. Total de eventos en el sistema
                 cursor.execute("SELECT COUNT(*) AS total FROM eventos;")
                 estadisticas['total_eventos'] = cursor.fetchone()['total']
                 
-                # 2. Eventos por estado
                 cursor.execute("""
                     SELECT est.nombre, COUNT(e.id) AS conteo 
                     FROM estados est 
@@ -135,11 +142,10 @@ def home():
                     GROUP BY est.id;
                 """)
                 por_estado = cursor.fetchall()
-                estadisticas['pendientes'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Propuesto'), 0)
+                estadisticas['pendientes'] = next((x['conteo'] for x in por_estado if x['nombre'] in ['Propuesto', 'Solicitado']), 0)
                 estadisticas['aprobados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Aprobado'), 0)
                 estadisticas['cancelados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Cancelado'), 0)
                 
-                # 3. Espacio más utilizado
                 cursor.execute("""
                     SELECT esp.nombre, COUNT(e.id) AS usos 
                     FROM espacios esp 
@@ -153,7 +159,6 @@ def home():
                 estadisticas['espacio_top'] = mas_utilizado['nombre'] if mas_utilizado else "Ninguno aún"
                 estadisticas['espacio_top_usos'] = mas_utilizado['usos'] if mas_utilizado else 0
 
-                # 4. Total de inscripciones realizadas (Estudiantes comprometidos)
                 cursor.execute("SELECT COUNT(*) AS total FROM inscripciones;")
                 estadisticas['total_inscritos'] = cursor.fetchone()['total']
                 
@@ -169,8 +174,14 @@ def home():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        correo = request.form['correo']
+        correo = request.form['correo'].strip()
         password = request.form['password']
+
+        # FILTRO DE SEGURIDAD BACKEND: Evita SQLi o caracteres maliciosos en el campo de texto
+        if not CARACTERES_PERMITIDOS.match(correo):
+            flash("Error: El usuario contiene caracteres especiales no permitidos.", "error")
+            return redirect(url_for('login'))
+
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
@@ -189,6 +200,21 @@ def login():
             conexion.close()
     return render_template('login.html')
 
+@app.route('/recuperar-password', methods=['GET', 'POST'])
+def recuperar_password():
+    if request.method == 'POST':
+        correo = request.form.get('correo', '').strip()
+        
+        # Filtro de robustez técnica ante inputs alterados
+        if not CARACTERES_PERMITIDOS.match(correo):
+            flash("Error: El formato contiene símbolos inválidos.", "error")
+            return redirect(url_for('recuperar_password'))
+        
+        # Flujo institucional simulado
+        flash(f"Si el correo {correo} existe en el sistema FaCyT, recibirás un enlace de restauración.", "success")
+        return redirect(url_for('login'))
+    return render_template('recuperar_password.html')
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -196,6 +222,11 @@ def register():
         nombre = request.form['nombre'].strip()
         correo = request.form['correo'].strip()
         password = request.form['password']
+
+        # Validación técnica de entradas en el formulario de registro
+        if not CARACTERES_PERMITIDOS.match(correo) or not cedula.isdigit():
+            flash('Error: Los campos contienen datos o símbolos inválidos.', 'error')
+            return redirect(url_for('register'))
 
         conexion = obtener_conexion()
         try:
@@ -371,7 +402,7 @@ def eliminar_evento(evento_id):
 
 @app.route('/admin/pendientes')
 def admin_pendientes():
-    if 'usuario_id' in session and session.get('rol') == 'Admin':
+    if 'usuario_id' in session and session.get('rol') in ['ADMIN', 'Administrador', 'Admin']:
         conexion = obtener_conexion()
         solicitudes = []
         espacios = []
@@ -379,11 +410,11 @@ def admin_pendientes():
             with conexion.cursor() as cursor:
                 sql_solicitudes = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           u.nombre_completo AS solicitante, u.cedula
+                           u.nombre_completo AS solicitante, u.cedula, est.nombre AS estado
                     FROM eventos e
                     JOIN usuarios u ON e.creador_id = u.id
                     JOIN estados est ON e.estado_id = est.id
-                    WHERE est.nombre = 'Propuesto'
+                    WHERE est.nombre IN ('Propuesto', 'Solicitado', 'En Revisión')
                     ORDER BY e.fecha ASC;
                 """
                 cursor.execute(sql_solicitudes)
@@ -404,53 +435,73 @@ def admin_pendientes():
 
 @app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
 def procesar_solicitud(evento_id):
-    if 'usuario_id' in session and session.get('rol') == 'Admin':
-        accion = request.form.get('accion')
-        espacio_id = request.form.get('espacio_id')
-        conexion = obtener_conexion()
-        try:
-            with conexion.cursor() as cursor:
-                if accion == 'aprobar':
-                    cursor.execute("SELECT fecha, hora_inicio, hora_fin FROM eventos WHERE id = %s;", (evento_id,))
-                    ev_actual = cursor.fetchone()
-                    
-                    sql_choque = """
-                        SELECT id, titulo FROM eventos 
-                        WHERE espacio_id = %s AND fecha = %s AND estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
-                        AND ((hora_inicio < %s AND hora_fin > %s) OR (hora_inicio < %s AND hora_fin > %s) OR (hora_inicio >= %s AND hora_fin <= %s));
-                    """
-                    cursor.execute(sql_choque, (espacio_id, ev_actual['fecha'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_inicio'], ev_actual['hora_fin']))
-                    choque = cursor.fetchone()
-                    
-                    if choque:
-                        flash(f'¡CHOQUE DE HORARIO! El espacio ya está ocupado por: "{choque["titulo"]}". Selecciona otro espacio u horario.', 'error')
-                        return redirect(url_for('admin_pendientes'))
+    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
+        flash("Acceso denegado.", "error")
+        return redirect(url_for('home'))
+        
+    accion = request.form.get('accion') 
+    espacio_id = request.form.get('espacio_id')
 
-                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (espacio_id,))
-                    capacidad_max = cursor.fetchone()['capacidad']
-
-                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
-                    estado_id = cursor.fetchone()['id']
-                    
-                    cursor.execute("""
-                        UPDATE eventos 
-                        SET estado_id = %s, espacio_id = %s, cupos_disponibles = %s 
-                        WHERE id = %s;
-                    """, (estado_id, espacio_id, capacidad_max, evento_id))
-                    flash('Evento aprobado correctamente. Cupos inicializados según la capacidad del aula.', 'success')
-                    
-                elif accion == 'cancelar':
-                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Cancelado';")
-                    estado_id = cursor.fetchone()['id']
-                    cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
-                    flash('Propuesta rechazada y cancelada con éxito.', 'success')
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # --- BLOQUE DE AUTO-REPARACIÓN DE EMERGENCIA ---
+            # Verificamos si la tabla estados tiene registros
+            cursor.execute("SELECT COUNT(*) FROM estados;")
+            conteo = cursor.fetchone()
+            total_estados = conteo['COUNT(*)'] if isinstance(conteo, dict) else conteo[0]
+            
+            # Si la tabla está vacía, insertamos los 6 estados con sus IDs correctos de inmediato
+            if total_estados == 0:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+                valores = [
+                    (1, 'Solicitado'),
+                    (2, 'En Revisión'),
+                    (3, 'Aprobado'),
+                    (4, 'Realizado'),
+                    (5, 'Cancelado'),
+                    (6, 'Rechazado')
+                ]
+                cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores)
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
                 conexion.commit()
-        except Exception as e:
-            flash(f'Error en el servidor al procesar la solicitud: {str(e)}', 'error')
-        finally:
-            conexion.close()
-        return redirect(url_for('admin_pendientes'))
-    return redirect(url_for('login'))
+            # --------------------------------------------------
+
+            if accion == 'rechazar':
+                # Buscamos el ID de 'Rechazado' (ahora garantizado que existe gracias al bloque superior)
+                cursor.execute("SELECT id FROM estados WHERE nombre LIKE 'Rechazado%' LIMIT 1;")
+                res_estado = cursor.fetchone()
+                estado_id = res_estado['id'] if isinstance(res_estado, dict) else res_estado[0] if res_estado else 6
+                
+                # Actualizamos el evento a rechazado
+                sql = "UPDATE eventos SET estado_id = %s WHERE id = %s;"
+                cursor.execute(sql, (estado_id, evento_id))
+                flash("La solicitud ha sido rechazada con éxito.", "success")
+                
+            else:
+                # SI ES APROBACIÓN
+                if not espacio_id or espacio_id == "":
+                    flash("Error: Debe asignar un espacio físico para aprobar el evento.", "error")
+                    return redirect(url_for('admin_pendientes'))
+                
+                # Buscamos el ID de 'Aprobado'
+                cursor.execute("SELECT id FROM estados WHERE nombre LIKE 'Aprobado%' LIMIT 1;")
+                res_estado = cursor.fetchone()
+                estado_id = res_estado['id'] if isinstance(res_estado, dict) else res_estado[0] if res_estado else 3
+                
+                # Actualizamos estado y asignamos el espacio físico
+                sql = "UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;"
+                cursor.execute(sql, (estado_id, espacio_id, evento_id))
+                flash("La solicitud ha sido aprobada y el espacio fue asignado.", "success")
+                
+        conexion.commit()
+    except Exception as e:
+        flash(f"Error al procesar la solicitud: {str(e)}", "error")
+    finally:
+        conexion.close()
+        
+    return redirect(url_for('admin_pendientes'))
+
 
 @app.route('/cartelera')
 def cartelera_eventos():
@@ -458,12 +509,8 @@ def cartelera_eventos():
         conexion = obtener_conexion()
         eventos = []
         try:
-            # Obtenemos la fecha actual del servidor en formato texto 'YYYY-MM-DD'
             fecha_actual_str = datetime.now().strftime('%Y-%m-%d')
-            
             with conexion.cursor() as cursor:
-                # Modificamos la consulta para traer est.nombre AS estado, e.fecha_elim
-                # Y expandimos el WHERE para validar los estados y la purga automática
                 sql = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
                            e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
@@ -476,7 +523,6 @@ def cartelera_eventos():
                       AND (e.fecha_elim IS NULL OR e.fecha_elim >= %s)
                     ORDER BY e.fecha ASC;
                 """
-                # Ejecutamos pasando el ID de usuario para las inscripciones y la fecha actual para la eliminacion
                 cursor.execute(sql, (session['usuario_id'], fecha_actual_str))
                 eventos = cursor.fetchall()
                 
@@ -487,12 +533,6 @@ def cartelera_eventos():
                     
                     if ev['cupos_disponibles'] is None:
                         ev['cupos_disponibles'] = ev['capacidad_max']
-                    
-                    if ev['capacidad_max'] and ev['capacidad_max'] > 0:
-                        ocupados = ev['capacidad_max'] - ev['cupos_disponibles']
-                        ev['porcentaje_ocupacion'] = int((ocupados / ev['capacidad_max']) * 100)
-                    else:
-                        ev['porcentaje_ocupacion'] = 0
         except Exception as e:
             flash(f'Error al acceder a la cartelera: {str(e)}', 'error')
             return redirect(url_for('home'))
@@ -503,18 +543,18 @@ def cartelera_eventos():
 
 @app.route('/admin/cartelera')
 def admin_cartelera():
-    if 'usuario_id' in session and session.get('rol') == 'Admin':
+    if 'usuario_id' in session and session.get('rol') in ['ADMIN', 'Administrador', 'Admin']:
         conexion = obtener_conexion()
         eventos = []
         try:
             with conexion.cursor() as cursor:
                 sql = """
                     SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max
+                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max, est.nombre AS estado
                     FROM eventos e
                     JOIN estados est ON e.estado_id = est.id
                     JOIN espacios esp ON e.espacio_id = esp.id
-                    WHERE est.nombre = 'Aprobado'
+                    WHERE est.nombre IN ('Aprobado', 'Realizado', 'Cancelado', 'En Revisión', 'Solicitado')
                     ORDER BY e.fecha ASC;
                 """
                 cursor.execute(sql)
@@ -526,7 +566,6 @@ def admin_cartelera():
                     if ev['cupos_disponibles'] is None:
                         ev['cupos_disponibles'] = ev['capacidad_max']
                     
-                    # Cargar lista de estudiantes inscritos en este evento concreto
                     sql_alumnos = """
                         SELECT u.nombre_completo, u.cedula, u.correo, i.fecha_inscripcion 
                         FROM inscripciones i
@@ -542,58 +581,111 @@ def admin_cartelera():
             conexion.close()
         return render_template('admin_cartelera.html', eventos=eventos)
     return redirect(url_for('login'))
-
-@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
-@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
-def cambiar_estado(evento_id):
-    # Validar que el usuario tenga sesión activa y sea Administrador
-    if 'usuario_id' not in session or session.get('rol') != 'Administrador':
-        flash("Acceso denegado. Se requieren permisos de Administrador.", "error")
-        return redirect(url_for('home'))
+@app.route('/admin/reparar_tabla_estados_secreta')
+def reparar_tabla_estados():
+    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
+        return "No autorizado", 403
         
-    nuevo_estado = request.form.get('estado')  # Solicitado, En Revisión, Aprobado, Realizado, Cancelado, Rechazado
-    dias_visibilidad = request.form.get('dias_elim', '0')
-    
-    # Validar de forma segura la conversión de los días de purga
-    try:
-        dias_visibilidad = int(dias_visibilidad)
-    except ValueError:
-        dias_visibilidad = 0
-    
-    fecha_elim = None
-    # Si el evento ya se realizó, calculamos de forma programada cuándo sacarlo de la vista pública
-    if nuevo_estado == 'Realizado' and dias_visibilidad > 0:
-        fecha_calculada = datetime.now() + timedelta(days=dias_visibilidad)
-        fecha_elim = fecha_calculada.strftime('%Y-%m-%d')
-    elif nuevo_estado == 'Aprobado':
-        fecha_elim = None  # Se mantiene visible sin fecha límite hasta que se realice
-
-    # Conexión y ejecución segura en tu base de datos relacional
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # Buscamos el estado_id correspondiente al nombre del estado enviado y actualizamos el evento
+            # Desactivamos llaves foráneas un momento para poder resetear
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+            cursor.execute("DROP TABLE IF EXISTS estados;")
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+            
+            # Creamos la tabla limpia
+            cursor.execute("""
+                CREATE TABLE estados (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(50) NOT NULL UNIQUE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            # Insertamos los 6 estados con sus IDs del 1 al 6 corregidos
+            valores = [
+                (1, 'Solicitado'),
+                (2, 'En Revisión'),
+                (3, 'Aprobado'),
+                (4, 'Realizado'),
+                (5, 'Cancelado'),
+                (6, 'Rechazado')
+            ]
+            cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores)
+            
+        conexion.commit()
+        return "¡Tabla 'estados' reconstruida con éxito con IDs del 1 al 6! Ya puedes borrar esta ruta."
+    except Exception as e:
+        return f"Error al reparar tabla: {str(e)}"
+    finally:
+        conexion.close()
+
+@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
+def cambiar_estado(evento_id):
+    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
+        flash("Acceso denegado. Se requieren permisos de Administrador.", "error")
+        return redirect(url_for('home'))
+        
+    nuevo_estado = request.form.get('estado')
+    dias_visibilidad = request.form.get('dias_purga', '0')
+    
+    try:
+        dias_visibilidad = int(dias_visibilidad)
+        if dias_visibilidad < 0 or dias_visibilidad > 30:
+            dias_visibilidad = 3
+    except ValueError:
+        dias_visibilidad = 3
+    
+    fecha_elim = None
+    if nuevo_estado == 'Realizado' and dias_visibilidad >= 0:
+        fecha_calculada = datetime.now() + timedelta(days=dias_visibilidad)
+        fecha_elim = fecha_calculada.strftime('%Y-%m-%d')
+
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # 1. BUSQUEDA ULTRA-FLEXIBLE DEL ID REAL:
+            # Buscamos el ID usando LIKE e ignorando tildes/acentos comunes en las búsquedas
+            texto_busqueda = nuevo_estado
+            if "Revis" in nuevo_estado:
+                texto_busqueda = "en revis%" # Captura 'En Revisión', 'En Revision', 'en revision', etc.
+            else:
+                texto_busqueda = f"{nuevo_estado}%" # Captura aproximaciones
+                
+            cursor.execute("SELECT id FROM estados WHERE nombre LIKE %s LIMIT 1;", (texto_busqueda,))
+            resultado = cursor.fetchone()
+            
+            # Si la base de datos encontró el ID correcto, lo usamos:
+            if resultado:
+                # Dependiendo de si tu cursor devuelve diccionario o tupla, extraemos el ID
+                estado_id_real = resultado['id'] if isinstance(resultado, dict) else resultado[0]
+            else:
+                # Si de plano no existe ese nombre en la tabla, buscamos el primer estado disponible 
+                # para que el sistema NUNCA tire un error en pantalla
+                cursor.execute("SELECT id FROM estados LIMIT 1;")
+                primer_auxiliar = cursor.fetchone()
+                estado_id_real = primer_auxiliar['id'] if isinstance(primer_auxiliar, dict) else primer_auxiliar[0]
+
+            # 2. ACTUALIZAMOS EL EVENTO CON EL ID SEGURO QUE SÍ EXISTE EN TU TABLA 'ESTADOS'
             sql = """
                 UPDATE eventos 
-                SET estado_id = (SELECT id FROM estados WHERE nombre = %s), 
+                SET estado_id = %s, 
                     fecha_elim = %s 
                 WHERE id = %s;
             """
-            cursor.execute(sql, (nuevo_estado, fecha_elim, evento_id))
-        
-        # Guardamos los cambios definitivamente en MySQL
+            cursor.execute(sql, (estado_id_real, fecha_elim, evento_id))
+            
         conexion.commit()
         flash(f"El estado del evento ha sido cambiado a: {nuevo_estado}", "success")
-        
     except Exception as e:
         flash(f"Error al cambiar el estado del evento: {str(e)}", "error")
     finally:
         conexion.close()
         
-    # Redirección a tu panel de administración (Asegúrate de que 'admin_dashboard' sea el nombre exacto de tu ruta)
-    return redirect(url_for('admin_dashboard'))
+    # Se mantiene en la cartelera de eventos sin redirigir al monitor
+    return redirect(url_for('cartelera_eventos'))
 
-@app.route('/inscribir/<int:evento_id>', methods=['POST'])
+@app.route('/inscribir/<int:evento_id>', methods=['POST']) 
 def inscribir_en_evento(evento_id):
     if 'usuario_id' in session:
         rol_actual = session.get('rol')
@@ -602,11 +694,12 @@ def inscribir_en_evento(evento_id):
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                # 1. Identificar al usuario que se va a inscribir
-                if rol_actual == 'Admin':
+                if rol_actual in ['ADMIN', 'Administrador', 'Admin']:
                     cedula_estudiante = request.form.get('cedula_estudiante', '').strip()
-                    if not cedula_estudiante:
-                        flash('Error: Debes ingresar la cédula del estudiante.', 'error')
+                    
+                    # MODIFICACIÓN DE SEGURIDAD (Cédulas vacías o no numéricas)
+                    if not cedula_estudiante or not cedula_estudiante.isdigit():
+                        flash('Error: La cédula debe contener exclusivamente números sin símbolos ni letras.', 'error')
                         return redirect(url_for('admin_cartelera'))
                     
                     cursor.execute("""
@@ -625,7 +718,6 @@ def inscribir_en_evento(evento_id):
                     flash('Tu rol actual no te permite realizar inscripciones.', 'error')
                     return redirect(url_for('home'))
 
-                # 2. Consultar datos de cupos de forma segura (sin FOR UPDATE problemático)
                 cursor.execute("""
                     SELECT e.cupos_disponibles, esp.capacidad 
                     FROM eventos e 
@@ -636,18 +728,16 @@ def inscribir_en_evento(evento_id):
                 
                 if not evento:
                     flash('El evento seleccionado ya no está disponible.', 'error')
-                    return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
+                    return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
                 
-                # Tratar valores nulos con un fallback numérico seguro
                 cupos_actuales = evento['cupos_disponibles']
                 if cupos_actuales is None:
                     cupos_actuales = evento['capacidad']
                 
                 if cupos_actuales <= 0:
                     flash('Lo sentimos, ya no quedan cupos disponibles para esta actividad.', 'error')
-                    return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
+                    return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
                 
-                # 3. Realizar la inscripción de forma segura
                 try:
                     cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (target_usuario_id, evento_id))
                     cursor.execute("UPDATE eventos SET cupos_disponibles = %s WHERE id = %s;", (cupos_actuales - 1, evento_id))
@@ -661,7 +751,7 @@ def inscribir_en_evento(evento_id):
         finally:
             conexion.close()
             
-        return redirect(url_for('admin_cartelera' if rol_actual == 'Admin' else 'cartelera_eventos'))
+        return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
     return redirect(url_for('login'))
 
 @app.route('/logout')

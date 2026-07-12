@@ -35,7 +35,7 @@
         <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
             <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
                 <h3 class="font-bold text-gray-700 text-sm">Tus Actividades Registradas</h3>
-                <span class="text-xs text-gray-500">Las solicitudes 'Propuestas' pueden ser modificadas o eliminadas</span>
+                <span class="text-xs text-gray-500">Las solicitudes 'Solicitado/Propuesto' pueden ser modificadas o eliminadas</span>
             </div>
 
             <div class="overflow-x-auto">
@@ -68,16 +68,16 @@
                                     {% endif %}
                                 </td>
                                 <td class="p-4 whitespace-nowrap">
-                                    {% if ev.estado_nombre == 'Propuesto' %}
-                                        <span class="bg-yellow-100 text-yellow-800 font-bold text-[10px] px-2 py-0.5 rounded border border-yellow-200 uppercase">Propuesto</span>
-                                    {% elif ev.estado_nombre == 'Aprobado' %}
+                                    {% if ev.estado in ['Propuesto', 'Solicitado'] %}
+                                        <span class="bg-yellow-100 text-yellow-800 font-bold text-[10px] px-2 py-0.5 rounded border border-yellow-200 uppercase">Solicitado</span>
+                                    {% elif ev.estado == 'Aprobado' %}
                                         <span class="bg-green-100 text-green-800 font-bold text-[10px] px-2 py-0.5 rounded border border-green-200 uppercase">Aprobado</span>
                                     {% else %}
-                                        <span class="bg-red-100 text-red-800 font-bold text-[10px] px-2 py-0.5 rounded border border-red-200 uppercase">Cancelado</span>
+                                        <span class="bg-red-100 text-red-800 font-bold text-[10px] px-2 py-0.5 rounded border border-red-200 uppercase">{{ ev.estado }}</span>
                                     {% endif %}
                                 </td>
                                 <td class="p-4 text-center whitespace-nowrap space-x-1">
-                                    {% if ev.estado_nombre == 'Propuesto' %}
+                                    {% if ev.estado in ['Propuesto', 'Solicitado'] %}
                                         <a href="{{ url_for('editar_evento', evento_id=ev.id) }}" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs font-semibold transition inline-block">
                                             Editar
                                         </a>

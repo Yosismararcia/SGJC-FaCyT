@@ -2744,3 +2744,179 @@ def cartelera_eventos():
             conexion.close()
         return render_template('cartelera.html', eventos=eventos)
     return redirect(url_for('login'))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <!-- Grilla de Tarjetas -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% if eventos %}
+                {% for ev in eventos %}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    
+                    <!-- Cuerpo de la Tarjeta -->
+                    <div class="p-5">
+                        <div class="flex justify-between items-start mb-3 gap-2">
+                            <span class="bg-blue-100 text-blue-800 font-bold text-[10px] px-2 py-0.5 rounded uppercase whitespace-nowrap">
+                                {{ ev.tipo_actividad }}
+                            </span>
+                            
+                            <!-- Semáforo de Estados Dinámicos -->
+                            {% if ev.estado == 'Aprobado' %}
+                                <span class="bg-green-100 text-green-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap">
+                                    🟢 Aprobado
+                                </span>
+                            {% elif ev.estado == 'Realizado' %}
+                                <span class="bg-purple-100 text-purple-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap">
+                                    🏁 Realizado
+                                </span>
+                            {% elif ev.estado == 'Cancelado' %}
+                                <span class="bg-red-100 text-red-800 font-bold text-[11px] px-2 py-0.5 rounded-full uppercase whitespace-nowrap animate-pulse">
+                                    🚨 Cancelado
+                                </span>
+                            {% else %}
+                                <span class="bg-gray-100 text-gray-800 font-medium text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                    {{ ev.cupos_disponibles }} cupos
+                                </span>
+                            {% endif %}
+                        </div>
+
+                        <h3 class="font-bold text-gray-900 text-base mb-2 line-clamp-2">{{ ev.titulo }}</h3>
+                        
+                        <div class="space-y-1.5 text-xs text-gray-600 border-t border-gray-100 pt-3 mt-3">
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Ubicación:</span>
+                                <span class="text-gray-900">{{ ev.espacio_nombre }}</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Fecha:</span>
+                                <span class="text-gray-900">{{ ev.fecha }}</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="font-semibold text-gray-700 w-16">Horario:</span>
+                                <span class="text-gray-900">{{ ev.hora_inicio }} - {{ ev.hora_fin }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Barra de progreso -->
+                        <div class="mt-4">
+                            <div class="flex justify-between text-[11px] text-gray-500 mb-1">
+                                <span>Capacidad: {{ ev.capacidad_max - ev.cupos_disponibles }} / {{ ev.capacidad_max }}</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                                {% set ocupados = ev.capacidad_max - ev.cupos_disponibles %}
+                                {% set pct = ((ocupados / ev.capacidad_max) * 100) | int %}
+                                <div class="bg-blue-600 h-1.5 rounded-full">
+                                    style="width: {{ pct }}%;"
+                                </div>
+                                
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botón -->
+                    <div class="p-4 bg-gray-50 border-t border-gray-100">
+                        {% if session.get('rol') == 'Estudiante' %}
+                            {% if ev.estado == 'Realizado' %}
+                                <button disabled class="w-full bg-purple-50 text-purple-600 font-semibold py-2 rounded-lg text-xs cursor-not-allowed border border-purple-200">Finalizado</button>
+                            {% elif ev.estado == 'Cancelado' %}
+                                <button disabled class="w-full bg-red-50 text-red-600 font-semibold py-2 rounded-lg text-xs cursor-not-allowed border border-red-200">Suspendido</button>
+                            {% else %}
+                                {% if ev.ya_inscrito > 0 %}
+                                    <button disabled class="w-full bg-green-600 text-white font-semibold py-2 rounded-lg text-xs cursor-not-allowed">✓ Ya inscrito</button>
+                                {% elif ev.cupos_disponibles <= 0 %}
+                                    <button disabled class="w-full bg-gray-300 text-gray-500 font-semibold py-2 rounded-lg text-xs cursor-not-allowed">Sin cupos</button>
+                                {% else %}
+                                    <form action="{{ url_for('inscribir_en_evento', evento_id=ev.id) }}" method="POST">
+                                        <button type="submit" class="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-2 rounded-lg text-xs transition">Reservar</button>
+                                    </form>
+                                {% endif %}
+                            {% endif %}
+                        {% else %}
+                            <div class="text-center text-[11px] font-medium text-slate-500 bg-slate-100 py-2 rounded-lg border uppercase">Estado: {{ ev.estado }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+
+
+                @app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
+def procesar_solicitud(evento_id):
+    if 'usuario_id' in session and session.get('rol') in ['ADMIN', 'Administrador', 'Admin']:
+        accion = request.form.get('accion')
+        espacio_id = request.form.get('espacio_id')
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                if accion == 'aprobar':
+                    cursor.execute("SELECT fecha, hora_inicio, hora_fin FROM eventos WHERE id = %s;", (evento_id,))
+                    ev_actual = cursor.fetchone()
+                    
+                    sql_choque = """
+                        SELECT id, titulo FROM eventos 
+                        WHERE espacio_id = %s AND fecha = %s AND estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
+                        AND ((hora_inicio < %s AND hora_fin > %s) OR (hora_inicio < %s AND hora_fin > %s) OR (hora_inicio >= %s AND hora_fin <= %s));
+                    """
+                    cursor.execute(sql_choque, (espacio_id, ev_actual['fecha'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_fin'], ev_actual['hora_inicio'], ev_actual['hora_inicio'], ev_actual['hora_fin']))
+                    choque = cursor.fetchone()
+                    
+                    if choque:
+                        flash(f'¡CHOQUE DE HORARIO! El espacio ya está ocupado por: "{choque["titulo"]}". Selecciona otro espacio u horario.', 'error')
+                        return redirect(url_for('admin_pendientes'))
+
+                    cursor.execute("SELECT capacidad FROM espacios WHERE id = %s;", (espacio_id,))
+                    capacidad_max = cursor.fetchone()['capacidad']
+
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Aprobado';")
+                    estado_id = cursor.fetchone()['id']
+                    
+                    cursor.execute("""
+                        UPDATE eventos 
+                        SET estado_id = %s, espacio_id = %s, cupos_disponibles = %s 
+                        WHERE id = %s;
+                    """, (estado_id, espacio_id, capacidad_max, evento_id))
+                    flash('Evento aprobado correctamente. Cupos inicializados según la capacidad del aula.', 'success')
+                    
+                elif accion == 'cancelar':
+                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Rechazado';")
+                    estado_id = cursor.fetchone()['id']
+                    cursor.execute("UPDATE eventos SET estado_id = %s WHERE id = %s;", (estado_id, evento_id))
+                    flash('Propuesta rechazada con éxito.', 'success')
+                conexion.commit()
+        except Exception as e:
+            flash(f'Error en el servidor al procesar la solicitud: {str(e)}', 'error')
+        finally:
+            conexion.close()
+        return redirect(url_for('admin_pendientes'))
+    return redirect(url_for('login'))
