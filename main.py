@@ -803,8 +803,8 @@ def inscribir_evento(evento_id):
         
     return redirect(url_for('cartelera'))
 
-@app.route('/admin/monitor')
-def admin_monitor():
+@app.route('/admin/cartelera')
+def admin_cartelera():
     if 'usuario_id' not in session or session.get('rol') not in ['Admin', 'ADMIN', 'Administrador']:
         flash("Acceso denegado.", "error")
         return redirect(url_for('home'))
@@ -833,7 +833,7 @@ def admin_monitor():
     finally:
         conexion.close()
         
-    return render_template('admin_monitor.html', eventos=eventos_historicos)
+    return render_template('admin_cartelera.html', eventos=eventos_historicos)
 
 @app.route('/logout')
 def logout():
