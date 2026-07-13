@@ -18,6 +18,7 @@ SMTP_PORT = 587
 EMAIL_EMISOR = "arciayosi@gmail.com"  
 EMAIL_PASSWORD = "DrakoM0810."       # Asegúrate de que esta sea tu Contraseña de Aplicación de Google
 
+#--- CARGA DE VARIABLES DE ENTORNO DESDE .env
 load_dotenv()
 
 app = Flask(__name__)
@@ -26,12 +27,14 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
 # EXPRESIÓN REGULAR: Previene inyecciones y símbolos raros
 CARACTERES_PERMITIDOS = re.compile(r"^[a-zA-Z0-9@._-]+$")
 
+#---- RUTA DE CONTROL DE SESIÓN Y TIEMPO DE INACTIVIDAD ----
 @app.before_request
 def controlar_sesion_y_tiempo():
-    session.permanent = True
-    app.permanent_session_lifetime = timedelta(minutes=15)
+    session.permanent = True # 
+    app.permanent_session_lifetime = timedelta(minutes=5)
     session.modified = True
 
+#----- FUNCIONES AUXILIARES -------------------
 def obtener_conexion():
     return pymysql.connect(
         host=os.getenv('DB_HOST'),
@@ -181,6 +184,81 @@ def inicializar_base_de_datos():
     finally:
         conexion.close()
 
+def enviar_correo_divulgacion(destinatarios, titulo_evento, fecha, horario, aula):
+    """
+    Se conecta al servidor SMTP institucional para notificar masivamente a los 
+    estudiantes sobre la aprobación y apertura de cupos de una nueva actividad académica.
+    """
+    # 1. Validación de control: Si la lista viene vacía, no procesamos el envío
+    if not destinatarios:
+        print("Divulgación cancelada: No se encontraron alumnos registrados en el sistema.")
+        return False
+
+    try:
+        # 2. Configuración del contenedor del mensaje (MIME)
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_EMISOR
+        # El campo 'To' visual mostrará el remitente institucional por estética, los correos van ocultos
+        msg['To'] = EMAIL_EMISOR 
+        msg['Subject'] = f"📢 NUEVA ACTIVIDAD ACADÉMICA: {titulo_evento} (FaCyT-UC)"
+
+        # 3. Diseño del Cuerpo del Mensaje en Formato HTML Limpio
+        cuerpo_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 8px; background-color: #fdfdfd;">
+                    <h2 style="color: #003366; text-align: center; border-bottom: 2px solid #003366; padding-bottom: 10px;">
+                        Cartelera Digital FaCyT
+                    </h2>
+                    <p>Estimado(a) estudiante de la comunidad FaCyT-UC,</p>
+                    <p>Te informamos que las autoridades de la facultad han evaluado y aprobado una nueva actividad académica de alto interés:</p>
+                    
+                    <div style="background-color: #f2f5f9; padding: 15px; border-left: 5px solid #003366; margin: 20px 0; border-radius: 4px;">
+                        <strong style="font-size: 1.1em; color: #111;">🎯 {titulo_evento}</strong><br><br>
+                        📅 <strong>Fecha:</strong> {fecha}<br>
+                        ⏰ <strong>Horario:</strong> {horario}<br>
+                        📍 <strong>Lugar asignado:</strong> {aula}
+                    </div>
+
+                    <p style="text-align: center; margin: 25px 0;">
+                        <a href="http://localhost:5000/login" 
+                           style="background-color: #003366; color: white; padding: 12px 25px; text-decoration: none; font-weight: bold; border-radius: 5px; display: inline-block;">
+                           Ingresar y Reservar Cupo
+                        </a>
+                    </p>
+                    
+                    <p style="font-size: 0.9em; color: #777;">
+                        ⚠️ <strong>Nota:</strong> Los cupos son limitados según la capacidad física del aula asignada. Asegura tu asistencia ingresando lo antes posible al sistema.
+                    </p>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;">
+                    <p style="font-size: 0.8em; color: #999; text-align: center;">
+                        Sistema Automatizado de Gestión de Eventos - Dirección de Asuntos Estudiantiles FaCyT
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+        msg.attach(MIMEText(cuerpo_html, 'html'))
+
+        # 4. Conexión e inicio de sesión seguro con el servidor SMTP
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()  # Cifra la comunicación (Transport Layer Security)
+        server.login(EMAIL_EMISOR, EMAIL_PASSWORD)
+
+        # 5. Envío con el método 'Bcc' (Copia Oculta) 
+        # Esto envía el correo a todos los alumnos protegiendo la privacidad de sus direcciones electrónicas.
+        server.sendmail(EMAIL_EMISOR, destinatarios, msg.as_string())
+        server.quit()
+        
+        print(f"Divulgación exitosa: Correo masivo enviado a {len(destinatarios)} estudiantes.")
+        return True
+
+    except Exception as e:
+        print(f"Error crítico en el protocolo SMTP: {str(e)}")
+        # Lanzamos la excepción hacia arriba para que la ruta 'procesar_solicitud' entienda que hubo un percance
+        raise e
+    
+#---------------------- RUTAS PRINCIPALES DE LA APLICACIÓN ---------------------------
 @app.route('/')
 def home():
     #inicializar_base_de_datos()
@@ -553,7 +631,7 @@ def admin_pendientes():
         conexion.close()
         
     return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
-
+    
 @app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
 def procesar_solicitud(evento_id):
     if 'usuario_id' not in session or session.get('rol') not in ['Admin', 'ADMIN', 'Administrador']:
@@ -646,322 +724,129 @@ def procesar_solicitud(evento_id):
 # mantener una ruta secreta que borre y altere los IDs dinámicamente es una vulnerabilidad técnica.
 
 @app.route('/cartelera')
-def cartelera_eventos():
-    if 'usuario_id' in session:
-        conexion = obtener_conexion()
-        eventos = []
-        try:
-            fecha_actual_str = datetime.now().strftime('%Y-%m-%d')
-            with conexion.cursor() as cursor:
-                sql = """
-                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max,
-                           est.nombre AS estado, e.fecha_elim,
-                           (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
-                    FROM eventos e
-                    JOIN estados est ON e.estado_id = est.id
-                    JOIN espacios esp ON e.espacio_id = esp.id
-                    WHERE est.nombre IN ('Aprobado', 'Realizado', 'Cancelado')
-                      AND (e.fecha_elim IS NULL OR e.fecha_elim >= %s)
-                    ORDER BY e.fecha ASC;
-                """
-                cursor.execute(sql, (session['usuario_id'], fecha_actual_str))
-                eventos = cursor.fetchall()
-                
-                for ev in eventos:
-                    ev['fecha'] = str(ev['fecha'])
-                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
-                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
-                    
-                    if ev['cupos_disponibles'] is None:
-                        ev['cupos_disponibles'] = ev['capacidad_max']
-        except Exception as e:
-            flash(f'Error al acceder a la cartelera: {str(e)}', 'error')
-            return redirect(url_for('home'))
-        finally:
-            conexion.close()
-        return render_template('cartelera.html', eventos=eventos)
-    return redirect(url_for('login'))
-
-@app.route('/admin/cartelera')
-def admin_cartelera():
-    if 'usuario_id' in session and session.get('rol') in ['ADMIN', 'Administrador', 'Admin']:
-        conexion = obtener_conexion()
-        eventos = []
-        try:
-            with conexion.cursor() as cursor:
-                sql = """
-                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           e.cupos_disponibles, esp.nombre AS espacio_nombre, esp.capacidad AS capacidad_max, est.nombre AS estado
-                    FROM eventos e
-                    JOIN estados est ON e.estado_id = est.id
-                    JOIN espacios esp ON e.espacio_id = esp.id
-                    WHERE est.nombre IN ('Aprobado', 'Realizado', 'Cancelado', 'En Revisión', 'Solicitado')
-                    ORDER BY e.fecha ASC;
-                """
-                cursor.execute(sql)
-                eventos = cursor.fetchall()
-                for ev in eventos:
-                    ev['fecha'] = str(ev['fecha'])
-                    ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
-                    ev['hora_fin'] = str(ev['hora_fin'])[:5]
-                    if ev['cupos_disponibles'] is None:
-                        ev['cupos_disponibles'] = ev['capacidad_max']
-                    
-                    sql_alumnos = """
-                        SELECT u.nombre_completo, u.cedula, u.correo, i.fecha_inscripcion 
-                        FROM inscripciones i
-                        JOIN usuarios u ON i.usuario_id = u.id
-                        WHERE i.evento_id = %s
-                        ORDER BY i.fecha_inscripcion ASC;
-                    """
-                    cursor.execute(sql_alumnos, (ev['id'],))
-                    ev['inscritos'] = cursor.fetchall()
-        except Exception as e:
-            flash(f'Error al cargar el monitor administrativo: {str(e)}', 'error')
-        finally:
-            conexion.close()
-        return render_template('admin_cartelera.html', eventos=eventos)
-    return redirect(url_for('login'))
-
-@app.route('/admin/reparar_tabla_estados_secreta')
-def reparar_tabla_estados():
-    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
-        return "No autorizado", 403
+def cartelera():
+    if 'usuario_id' not in session:
+        return redirect(url_for('login'))
         
+    conexion = obtener_conexion()
+    eventos = []
+    try:
+        with conexion.cursor() as cursor:
+            # Trae solo los eventos 'Aprobados' (ID 3) que ocurrirán hoy o en el futuro
+            sql = """
+                SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                       esp.nombre AS espacio_nombre, e.cupos_disponibles,
+                       (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id AND usuario_id = %s) AS ya_inscrito
+                FROM eventos e
+                JOIN espacios esp ON e.espacio_id = esp.id
+                WHERE e.estado_id = 3 AND e.fecha >= CURDATE()
+                ORDER BY e.fecha ASC, e.hora_inicio ASC;
+            """
+            cursor.execute(sql, (session['usuario_id'],))
+            eventos = cursor.fetchall()
+            
+            # Formateo visual estricto para Jinja2
+            for ev in eventos:
+                ev['fecha'] = str(ev['fecha'])
+                ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                ev['hora_fin'] = str(ev['hora_fin'])[:5]
+    except Exception as e:
+        print(f"Error al cargar cartelera: {str(e)}")
+        flash('Error al sincronizar la cartelera de actividades.', 'error')
+    finally:
+        conexion.close()
+        
+    return render_template('cartelera.html', eventos=eventos)
+
+@app.route('/inscribir/<int:evento_id>', methods=['POST'])
+def inscribir_evento(evento_id):
+    if 'usuario_id' not in session or session.get('rol') != 'Estudiante':
+        flash("Acceso restringido. Solo los estudiantes pueden inscribirse a las actividades.", "error")
+        return redirect(url_for('cartelera'))
+        
+    usuario_id = session['usuario_id']
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # Desactivamos llaves foráneas un momento para poder resetear
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-            cursor.execute("DROP TABLE IF EXISTS estados;")
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+            # 1. Bloqueo de concurrencia: Validar estado actual y cupos disponibles en un solo paso
+            cursor.execute("SELECT cupos_disponibles, estado_id, titulo FROM eventos WHERE id = %s FOR UPDATE;", (evento_id,))
+            evento = cursor.fetchone()
             
-            # Creamos la tabla limpia
-            cursor.execute("""
-                CREATE TABLE estados (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    nombre VARCHAR(50) NOT NULL UNIQUE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
+            if not evento or evento['estado_id'] != 3:
+                flash("El evento seleccionado no está disponible o ha sido cancelado.", "error")
+                return redirect(url_for('cartelera'))
+                
+            if evento['cupos_disponibles'] is not None and evento['cupos_disponibles'] <= 0:
+                flash("Lo sentimos, los cupos para esta actividad académica se han agotado.", "error")
+                return redirect(url_for('cartelera'))
+                
+            # 2. Verificar si ya se encuentra inscrito (Doble capa de seguridad junto al UNIQUE KEY de la BD)
+            cursor.execute("SELECT id FROM inscripciones WHERE usuario_id = %s AND evento_id = %s;", (usuario_id, evento_id))
+            if cursor.fetchone():
+                flash("Ya te encuentras registrado en este evento.", "warning")
+                return redirect(url_for('cartelera'))
+                
+            # 3. Insertar la inscripción y restar un cupo en la misma transacción (Atómico)
+            cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (usuario_id, evento_id))
+            if evento['cupos_disponibles'] is not None:
+                cursor.execute("UPDATE eventos SET cupos_disponibles = cupos_disponibles - 1 WHERE id = %s;", (evento_id,))
+                
+            conexion.commit()
+            flash(f"¡Inscripción exitosa al evento: {evento['titulo']}!", "success")
             
-            # Insertamos los 6 estados con sus IDs del 1 al 6 corregidos
-            valores = [
-                (1, 'Solicitado'),
-                (2, 'En Revisión'),
-                (3, 'Aprobado'),
-                (4, 'Realizado'),
-                (5, 'Cancelado'),
-                (6, 'Rechazado')
-            ]
-            cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores)
-            
-        conexion.commit()
-        return "¡Tabla 'estados' reconstruida con éxito con IDs del 1 al 6! Ya puedes borrar esta ruta."
     except Exception as e:
-        return f"Error al reparar tabla: {str(e)}"
+        conexion.rollback()
+        print(f"Error crítico en el proceso de inscripción: {str(e)}")
+        flash("Error interno al procesar tu inscripción. Inténtalo de nuevo.", "error")
     finally:
         conexion.close()
+        
+    return redirect(url_for('cartelera'))
 
-@app.route('/admin/cambiar_estado/<int:evento_id>', methods=['POST'])
-def cambiar_estado(evento_id):
-    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
-        flash("Acceso denegado. Se requieren permisos de Administrador.", "error")
+@app.route('/admin/monitor')
+def admin_monitor():
+    if 'usuario_id' not in session or session.get('rol') not in ['Admin', 'ADMIN', 'Administrador']:
+        flash("Acceso denegado.", "error")
         return redirect(url_for('home'))
         
-    nuevo_estado = request.form.get('estado')
-    dias_visibilidad = request.form.get('dias_purga', '0')
-    
-    try:
-        dias_visibilidad = int(dias_visibilidad)
-        if dias_visibilidad < 0 or dias_visibilidad > 30:
-            dias_visibilidad = 3
-    except ValueError:
-        dias_visibilidad = 3
-    
-    fecha_elim = None
-    if nuevo_estado == 'Realizado' and dias_visibilidad >= 0:
-        fecha_calculada = datetime.now() + timedelta(days=dias_visibilidad)
-        fecha_elim = fecha_calculada.strftime('%Y-%m-%d')
-
     conexion = obtener_conexion()
+    eventos_historicos = []
     try:
         with conexion.cursor() as cursor:
-            # 1. BUSQUEDA ULTRA-FLEXIBLE DEL ID REAL:
-            # Buscamos el ID usando LIKE e ignorando tildes/acentos comunes en las búsquedas
-            texto_busqueda = nuevo_estado
-            if "Revis" in nuevo_estado:
-                texto_busqueda = "en revis%" # Captura 'En Revisión', 'En Revision', 'en revision', etc.
-            else:
-                texto_busqueda = f"{nuevo_estado}%" # Captura aproximaciones
-                
-            cursor.execute("SELECT id FROM estados WHERE nombre LIKE %s LIMIT 1;", (texto_busqueda,))
-            resultado = cursor.fetchone()
-            
-            # Si la base de datos encontró el ID correcto, lo usamos:
-            if resultado:
-                # Dependiendo de si tu cursor devuelve diccionario o tupla, extraemos el ID
-                estado_id_real = resultado['id'] if isinstance(resultado, dict) else resultado[0]
-            else:
-                # Si de plano no existe ese nombre en la tabla, buscamos el primer estado disponible 
-                # para que el sistema NUNCA tire un error en pantalla
-                cursor.execute("SELECT id FROM estados LIMIT 1;")
-                primer_auxiliar = cursor.fetchone()
-                estado_id_real = primer_auxiliar['id'] if isinstance(primer_auxiliar, dict) else primer_auxiliar[0]
-
-            # 2. ACTUALIZAMOS EL EVENTO CON EL ID SEGURO QUE SÍ EXISTE EN TU TABLA 'ESTADOS'
+            # Muestra el listado global de control de actividades aprobadas, realizadas o rechazadas
             sql = """
-                UPDATE eventos 
-                SET estado_id = %s, 
-                    fecha_elim = %s 
-                WHERE id = %s;
+                SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, est.nombre AS estado, esp.nombre AS espacio_nombre,
+                       (SELECT COUNT(*) FROM inscripciones WHERE evento_id = e.id) AS total_participantes
+                FROM eventos e
+                JOIN estados est ON e.estado_id = est.id
+                LEFT JOIN espacios esp ON e.espacio_id = esp.id
+                ORDER BY e.fecha DESC;
             """
-            cursor.execute(sql, (estado_id_real, fecha_elim, evento_id))
+            cursor.execute(sql)
+            eventos_historicos = cursor.fetchall()
             
-        conexion.commit()
-        flash(f"El estado del evento ha sido cambiado a: {nuevo_estado}", "success")
+            for ev in eventos_historicos:
+                ev['fecha'] = str(ev['fecha'])
     except Exception as e:
-        flash(f"Error al cambiar el estado del evento: {str(e)}", "error")
+        print(f"Error en monitor administrativo: {str(e)}")
+        flash('Error al recopilar el historial administrativo.', 'error')
     finally:
         conexion.close()
         
-    # Se mantiene en la cartelera de eventos sin redirigir al monitor
-    return redirect(url_for('cartelera_eventos'))
+    return render_template('admin_monitor.html', eventos=eventos_historicos)
 
-@app.route('/inscribir/<int:evento_id>', methods=['POST']) 
-def inscribir_en_evento(evento_id):
-    if 'usuario_id' in session:
-        rol_actual = session.get('rol')
-        target_usuario_id = None
-        
-        conexion = obtener_conexion()
-        try:
-            with conexion.cursor() as cursor:
-                if rol_actual in ['ADMIN', 'Administrador', 'Admin']:
-                    cedula_estudiante = request.form.get('cedula_estudiante', '').strip()
-                    
-                    # MODIFICACIÓN DE SEGURIDAD (Cédulas vacías o no numéricas)
-                    if not cedula_estudiante or not cedula_estudiante.isdigit():
-                        flash('Error: La cédula debe contener exclusivamente números sin símbolos ni letras.', 'error')
-                        return redirect(url_for('admin_cartelera'))
-                    
-                    cursor.execute("""
-                        SELECT u.id FROM usuarios u 
-                        JOIN roles r ON u.role_id = r.id 
-                        WHERE u.cedula = %s AND r.nombre = 'Estudiante';
-                    """, (cedula_estudiante,))
-                    estudiante = cursor.fetchone()
-                    if not estudiante:
-                        flash('Error: No se encontró ningún estudiante registrado con esa cédula.', 'error')
-                        return redirect(url_for('admin_cartelera'))
-                    target_usuario_id = estudiante['id']
-                elif rol_actual == 'Estudiante':
-                    target_usuario_id = session['usuario_id']
-                else:
-                    flash('Tu rol actual no te permite realizar inscripciones.', 'error')
-                    return redirect(url_for('home'))
-
-                cursor.execute("""
-                    SELECT e.cupos_disponibles, esp.capacidad 
-                    FROM eventos e 
-                    JOIN espacios esp ON e.espacio_id = esp.id 
-                    WHERE e.id = %s;
-                """, (evento_id,))
-                evento = cursor.fetchone()
-                
-                if not evento:
-                    flash('El evento seleccionado ya no está disponible.', 'error')
-                    return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
-                
-                cupos_actuales = evento['cupos_disponibles']
-                if cupos_actuales is None:
-                    cupos_actuales = evento['capacidad']
-                
-                if cupos_actuales <= 0:
-                    flash('Lo sentimos, ya no quedan cupos disponibles para esta actividad.', 'error')
-                    return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
-                
-                try:
-                    cursor.execute("INSERT INTO inscripciones (usuario_id, evento_id) VALUES (%s, %s);", (target_usuario_id, evento_id))
-                    cursor.execute("UPDATE eventos SET cupos_disponibles = %s WHERE id = %s;", (cupos_actuales - 1, evento_id))
-                    conexion.commit()
-                    flash('¡Inscripción procesada con éxito!', 'success')
-                except pymysql.err.IntegrityError:
-                    flash('El estudiante ya se encuentra registrado en esta actividad.', 'error')
-                    
-        except Exception as e:
-            flash(f'Error interno en el proceso de inscripción: {str(e)}', 'error')
-        finally:
-            conexion.close()
-            
-        return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
-    return redirect(url_for('login'))
-
-def enviar_correo_divulgacion(destinatarios, titulo_evento, fecha, hora, espacio):
-    """
-    Construye y envía el correo electrónico para cumplir con la divulgación de eventos.
-    """
-    if not destinatarios:
-        return False
-
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_EMISOR
-    # Convertimos la lista de correos en una cadena separada por comas
-    msg['To'] = ", ".join(destinatarios) if isinstance(destinatarios, list) else destinatarios
-    msg['Subject'] = f"📢 ¡Nuevo Evento Publicado!: {titulo_evento}"
-
-    # Cuerpo del mensaje en formato HTML limpio y adaptado
-    cuerpo_html = f"""
-    <html>
-        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-            <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
-                <div style="background-color: #1e3a8a; color: white; padding: 20px; text-align: center;">
-                    <h2 style="margin: 0;">SGC - FaCyT</h2>
-                    <p style="margin: 5px 0 0 0; font-size: 14px;">Divulgación Oficial de Actividades Académicas</p>
-                </div>
-                <div style="padding: 20px;">
-                    <p>Estimada comunidad universitaria,</p>
-                    <p>Nos complace invitarlos al próximo evento que ha sido incorporado a nuestra cartelera oficial:</p>
-                    
-                    <div style="background-color: #f3f4f6; border-left: 4px solid #1e3a8a; padding: 15px; margin: 20px 0; border-radius: 4px;">
-                        <h3 style="margin: 0 0 10px 0; color: #1e3a8a;">{titulo_evento}</h3>
-                        <p style="margin: 5px 0;"><strong>📍 Ubicación:</strong> {espacio}</p>
-                        <p style="margin: 5px 0;"><strong>📅 Fecha:</strong> {fecha}</p>
-                        <p style="margin: 5px 0;"><strong>⏰ Horario:</strong> {hora}</p>
-                    </div>
-                    
-                    <p>Ya puedes ingresar al portal del sistema para apartar tu cupo y registrar tu asistencia.</p>
-                    <p style="text-align: center; margin-top: 30px;">
-                        <a href="http://localhost:5000/cartelera" style="background-color: #1e3a8a; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Ver en la Cartelera</a>
-                    </p>
-                </div>
-                <div style="background-color: #f9fafb; color: #666; padding: 10px; text-align: center; font-size: 12px; border-top: 1px solid #ddd;">
-                    Este es un correo automatizado de la plataforma, por favor no lo respondas.
-                </div>
-            </div>
-        </body>
-    </html>
-    """
-    
-    msg.attach(MIMEText(cuerpo_html, 'html'))
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_EMISOR, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_EMISOR, destinatarios, msg.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        print(f"Error enviando correo de divulgación: {str(e)}")
-        return False
-    
 @app.route('/logout')
 def logout():
     session.clear()
-    flash('Sesión cerrada correctamente.', 'success')
+    flash("Sesión cerrada correctamente. ¡Hasta luego!", "success")
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    # El puerto se mapea de forma dinámica para evitar colisiones en Render u otros servidores web
+    puerto = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=puerto, debug=True)
+
+
+
+
+
