@@ -1,4 +1,4 @@
-#--------------------------- NUEVA MODIFICACION 9:30 11-07
+#--------------------------- NUEVA MODIFICACION INTEGRADA 2026
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import pymysql
@@ -15,24 +15,21 @@ from email.mime.multipart import MIMEMultipart
 # ==========================================
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-EMAIL_EMISOR = "arciayosi@gmail.com"  # Reemplaza por el correo de la facultad/pruebas
-EMAIL_PASSWORD = "DrakoM0810."       # Reemplaza por tu contraseña de aplicación de Google
+EMAIL_EMISOR = "arciayosi@gmail.com"  
+EMAIL_PASSWORD = "DrakoM0810."       # Asegúrate de que esta sea tu Contraseña de Aplicación de Google
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', '27894120')
 
-# EXPRESIÓN REGULAR: Solo permite letras, números, puntos, guiones y @ (Previene Inyecciones y Símbolos Raros)
+# EXPRESIÓN REGULAR: Previene inyecciones y símbolos raros
 CARACTERES_PERMITIDOS = re.compile(r"^[a-zA-Z0-9@._-]+$")
 
 @app.before_request
 def controlar_sesion_y_tiempo():
-    # MODIFICACIÓN DE SEGURIDAD: Al cerrar el navegador o pestaña, la cookie de sesión caduca
     session.permanent = True
-    # Establece el tiempo límite estricto de 15 minutos de inactividad
     app.permanent_session_lifetime = timedelta(minutes=15)
-    # Refresca el reloj con cada interacción o clic que realice el usuario
     session.modified = True
 
 def obtener_conexion():
@@ -50,24 +47,89 @@ def inicializar_base_de_datos():
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            cursor.execute("CREATE TABLE IF NOT EXISTS personal_autorizado (cedula VARCHAR(20) PRIMARY KEY, correo_institucional VARCHAR(100) UNIQUE NOT NULL, tipo_personal VARCHAR(20) NOT NULL);")
-            cursor.execute("CREATE TABLE IF NOT EXISTS roles (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
-            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre_completo VARCHAR(100) NOT NULL, correo VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, cedula VARCHAR(20) UNIQUE NOT NULL, role_id INT NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id));")
-            cursor.execute("CREATE TABLE IF NOT EXISTS espacios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(50) UNIQUE NOT NULL, tipo VARCHAR(30) NOT NULL, capacidad INT NOT NULL, ubicacion VARCHAR(100) NOT NULL);")
-            cursor.execute("CREATE TABLE IF NOT EXISTS estados (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(20) UNIQUE NOT NULL);")
+            # 1. DESACTIVACIÓN DE RESTRICCIONES PARA LIMPIEZA TOTAL
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+            
+            # 2. DROP TABLES: Reseteo controlado para reestructurar IDs
+            tablas = ["inscripciones", "eventos", "usuarios", "espacios", "estados", "roles", "personal_autorizado"]
+            for tabla in tablas:
+                cursor.execute(f"DROP TABLE IF EXISTS {tabla};")
+            
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+            print("¡Base de datos limpia desde cero!")
+
+            # 3. CREACIÓN DE TABLAS MAESTRAS (Sin Auto-Incremento en estados)
+            cursor.execute("""
+                CREATE TABLE personal_autorizado (
+                    cedula VARCHAR(20) PRIMARY KEY, 
+                    correo_institucional VARCHAR(100) UNIQUE NOT NULL, 
+                    tipo_personal VARCHAR(20) NOT NULL
+                );
+            """)
             
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS eventos (
+                CREATE TABLE roles (
+                    id INT AUTO_INCREMENT PRIMARY KEY, 
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE usuarios (
+                    id INT AUTO_INCREMENT PRIMARY KEY, 
+                    nombre_completo VARCHAR(100) NOT NULL, 
+                    correo VARCHAR(100) UNIQUE NOT NULL, 
+                    password_hash VARCHAR(255) NOT NULL, 
+                    cedula VARCHAR(20) UNIQUE NOT NULL, 
+                    role_id INT NOT NULL, 
+                    FOREIGN KEY (role_id) REFERENCES roles(id)
+                );
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE espacios (
+                    id INT AUTO_INCREMENT PRIMARY KEY, 
+                    nombre VARCHAR(50) UNIQUE NOT NULL, 
+                    tipo VARCHAR(30) NOT NULL, 
+                    capacidad INT NOT NULL, 
+                    ubicacion VARCHAR(100) NOT NULL
+                );
+            """)
+            
+            # --- CORRECCIÓN CRÍTICA: ID ESTÁTICO MANUAL ---
+            cursor.execute("""
+                CREATE TABLE estados (
+                    id INT PRIMARY KEY, 
+                    nombre VARCHAR(20) UNIQUE NOT NULL
+                );
+            """)
+           
+            # 4. INYECCIÓN REGLAMENTARIA DE ESTADOS (IDs del 1 al 6)
+            valores_estados = [
+                (1, 'Solicitado'),
+                (2, 'En Revisión'),
+                (3, 'Aprobado'),
+                (4, 'Realizado'),
+                (5, 'Cancelado'),
+                (6, 'Rechazado')
+            ]
+            cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores_estados)
+            print("Estados estáticos (1-6) inyectados con éxito.")
+
+            # 5. CREACIÓN DE TABLAS TRANSACCIONALES
+            cursor.execute("""
+                CREATE TABLE eventos (
                     id INT AUTO_INCREMENT PRIMARY KEY, 
                     titulo VARCHAR(150) NOT NULL, 
                     tipo_actividad VARCHAR(50) NOT NULL, 
                     fecha DATE NOT NULL, 
                     hora_inicio TIME NOT NULL, 
                     hora_fin TIME NOT NULL, 
-                    estado_id INT NOT NULL, 
+                    estado_id INT DEFAULT 1, 
                     espacio_id INT NULL, 
                     creador_id INT NOT NULL,
                     cupos_disponibles INT NULL,
+                    fecha_elim VARCHAR(10) NULL,
                     FOREIGN KEY (estado_id) REFERENCES estados(id), 
                     FOREIGN KEY (espacio_id) REFERENCES espacios(id), 
                     FOREIGN KEY (creador_id) REFERENCES usuarios(id)
@@ -75,7 +137,7 @@ def inicializar_base_de_datos():
             """)
 
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS inscripciones (
+                CREATE TABLE  inscripciones (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     usuario_id INT NOT NULL,
                     evento_id INT NOT NULL,
@@ -86,50 +148,34 @@ def inicializar_base_de_datos():
                 );
             """)
             
-            # Control de migraciones seguras de columnas opcionales
-            try:
-                cursor.execute("ALTER TABLE eventos ADD COLUMN cupos_disponibles INT NULL;")
-            except Exception:
-                pass
-            try:
-                cursor.execute("ALTER TABLE eventos ADD COLUMN fecha_elim VARCHAR(10) NULL;")
-            except Exception:
-                pass
+            # 6. POBLADO DE DATOS MAESTROS DE CONTROL
+            cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
 
-            # Poblar tablas maestras si están vacías
-            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
-            if cursor.fetchone()['total'] == 0:
-                cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
-
-            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
-            if cursor.fetchone()['total'] == 0:
-                cursor.executemany("INSERT INTO estados (nombre) VALUES (%s);", 
-                                   [('Propuesto',), ('Solicitado',), ('En Revisión',), ('Aprobado',), ('Realizado',), ('Cancelado',), ('Rechazado',)])
-
-            cursor.execute("SELECT COUNT(*) AS total FROM espacios;")
-            if cursor.fetchone()['total'] == 0:
-                espacios_facyt = [
-                    ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
-                    ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
-                    ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
-                ]
-                cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+            espacios_facyt = [
+                ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
+                ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
+                ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
+            ]
+            cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
 
             usuarios_autorizados = [
                 ('27894120', 'arciayosi@gmail.com', 'Admin'),
                 ('22222222', 'yosi12141@gmail.com', 'Profesor'),
                 ('33333333', 'yarcia@uc.edu.ve', 'Estudiante')
             ]
-            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+            cursor.executemany("INSERT INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
 
-            cursor.execute("SELECT id FROM usuarios WHERE correo = 'arciayosi@gmail.com';")
-            if not cursor.fetchone():
-                cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
-                role_id = cursor.fetchone()['id']
-                pass_hash = generate_password_hash('admin123')
-                cursor.execute("INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);", ('Administrador de Pruebas', 'admin.facyt@uc.edu.ve', pass_hash, '12345678', role_id))
+            # 7. CREACIÓN DEL ADMINISTRADOR POR DEFECTO
+            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+            role_id = cursor.fetchone()['id']
+            pass_hash = generate_password_hash('admin123')
+            cursor.execute("""
+                INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) 
+                VALUES (%s, %s, %s, %s, %s);
+            """, ('Administrador de Pruebas', 'arciayosi@gmail.com', pass_hash, '27894120', role_id))
             
             conexion.commit()
+            print("¡Inicialización de base de datos completada exitosamente!")
     except Exception as e:
         print(f"Error al inicializar base de datos: {str(e)}")
     finally:
@@ -137,32 +183,37 @@ def inicializar_base_de_datos():
 
 @app.route('/')
 def home():
-    inicializar_base_de_datos()
+    #inicializar_base_de_datos()
     if 'usuario_id' in session:
         conexion = obtener_conexion()
         estadisticas = {}
         try:
             with conexion.cursor() as cursor:
+                # 1. Conteo total de eventos en el sistema
                 cursor.execute("SELECT COUNT(*) AS total FROM eventos;")
                 estadisticas['total_eventos'] = cursor.fetchone()['total']
                 
+                # 2. Agrupación por estados reales (IDs del 1 al 6)
                 cursor.execute("""
                     SELECT est.nombre, COUNT(e.id) AS conteo 
                     FROM estados est 
                     LEFT JOIN eventos e ON e.estado_id = est.id 
-                    GROUP BY est.id;
+                    GROUP BY est.id, est.nombre;
                 """)
                 por_estado = cursor.fetchall()
-                estadisticas['pendientes'] = next((x['conteo'] for x in por_estado if x['nombre'] in ['Propuesto', 'Solicitado']), 0)
+                
+                # CORRECCIÓN DE LÓGICA: Pendientes son tanto las 'Solicitado' (ID 1) como 'En Revisión' (ID 2)
+                estadisticas['pendientes'] = sum(x['conteo'] for x in por_estado if x['nombre'] in ['Solicitado', 'En Revisión'])
                 estadisticas['aprobados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Aprobado'), 0)
                 estadisticas['cancelados'] = next((x['conteo'] for x in por_estado if x['nombre'] == 'Cancelado'), 0)
                 
+                # 3. Métrica de uso del Espacio Físico Top (Solo toma en cuenta eventos Aprobados)
                 cursor.execute("""
                     SELECT esp.nombre, COUNT(e.id) AS usos 
                     FROM espacios esp 
                     JOIN eventos e ON e.espacio_id = esp.id 
-                    WHERE e.estado_id = (SELECT id FROM estados WHERE nombre = 'Aprobado')
-                    GROUP BY esp.id 
+                    WHERE e.estado_id = 3
+                    GROUP BY esp.id, esp.nombre 
                     ORDER BY usos DESC 
                     LIMIT 1;
                 """)
@@ -170,16 +221,24 @@ def home():
                 estadisticas['espacio_top'] = mas_utilizado['nombre'] if mas_utilizado else "Ninguno aún"
                 estadisticas['espacio_top_usos'] = mas_utilizado['usos'] if mas_utilizado else 0
 
+                # 4. Total de alumnos registrados en actividades
                 cursor.execute("SELECT COUNT(*) AS total FROM inscripciones;")
                 estadisticas['total_inscritos'] = cursor.fetchone()['total']
                 
         except Exception as e:
-            print(f"Error al calcular estadísticas: {str(e)}")
-            estadisticas = {'total_eventos': 0, 'pendientes': 0, 'aprobados': 0, 'cancelados': 0, 'espacio_top': 'Error', 'espacio_top_usos': 0, 'total_inscritos': 0}
+            print(f"Error al calcular estadísticas del Dashboard: {str(e)}")
+            # Valores seguros de respaldo por si la base de datos está temporalmente caída
+            estadisticas = {
+                'total_eventos': 0, 'pendientes': 0, 'aprobados': 0, 
+                'cancelados': 0, 'espacio_top': 'Error de carga', 
+                'espacio_top_usos': 0, 'total_inscritos': 0
+            }
         finally:
             conexion.close()
             
         return render_template('dashboard.html', stats=estadisticas)
+    
+    # Si no hay sesión activa, obligamos a ir al Login institucional
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -188,7 +247,7 @@ def login():
         correo = request.form['correo'].strip()
         password = request.form['password']
 
-        # FILTRO DE SEGURIDAD BACKEND: Evita SQLi o caracteres maliciosos en el campo de texto
+        # FILTRO DE SEGURIDAD BACKEND: Evita SQLi o caracteres maliciosos
         if not CARACTERES_PERMITIDOS.match(correo):
             flash("Error: El usuario contiene caracteres especiales no permitidos.", "error")
             return redirect(url_for('login'))
@@ -196,35 +255,33 @@ def login():
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
-                sql = "SELECT u.*, r.nombre AS rol_nombre FROM usuarios u JOIN roles r ON u.role_id = r.id WHERE u.correo = %s;"
+                # Modificado para traer el nombre del rol usando la relación correcta con la tabla 'roles'
+                sql = """
+                    SELECT u.*, r.nombre AS rol_nombre 
+                    FROM usuarios u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.correo = %s;
+                """
                 cursor.execute(sql, (correo,))
                 usuario = cursor.fetchone()
+                
+                # Verificación segura del hash de la contraseña
                 if usuario and check_password_hash(usuario['password_hash'], password):
                     session['usuario_id'] = usuario['id']
                     session['nombre'] = usuario['nombre_completo']
-                    session['rol'] = usuario['rol_nombre']
+                    session['rol'] = usuario['rol_nombre']  # 'Admin', 'Profesor' o 'Estudiante'
                     session['cedula'] = usuario['cedula']
+                    flash(f"¡Bienvenido de vuelta, {usuario['nombre_completo']}!", "success")
                     return redirect(url_for('home'))
                 else:
                     flash('Correo o contraseña incorrectos.', 'error')
+        except Exception as e:
+            print(f"Error en el proceso de Login: {str(e)}")
+            flash("Ocurrió un error interno en el servidor al iniciar sesión.", "error")
         finally:
             conexion.close()
+            
     return render_template('login.html')
-
-@app.route('/recuperar-password', methods=['GET', 'POST'])
-def recuperar_password():
-    if request.method == 'POST':
-        correo = request.form.get('correo', '').strip()
-        
-        # Filtro de robustez técnica ante inputs alterados
-        if not CARACTERES_PERMITIDOS.match(correo):
-            flash("Error: El formato contiene símbolos inválidos.", "error")
-            return redirect(url_for('recuperar_password'))
-        
-        # Flujo institucional simulado
-        flash(f"Si el correo {correo} existe en el sistema FaCyT, recibirás un enlace de restauración.", "success")
-        return redirect(url_for('login'))
-    return render_template('recuperar_password.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -242,6 +299,7 @@ def register():
         conexion = obtener_conexion()
         try:
             with conexion.cursor() as cursor:
+                # 1. Verificar si la persona pertenece al personal autorizado por la FaCyT
                 cursor.execute("SELECT * FROM personal_autorizado WHERE cedula = %s AND correo_institucional = %s;", (cedula, correo))
                 personal = cursor.fetchone()
 
@@ -249,167 +307,211 @@ def register():
                     flash('Error: Tus datos no figuran en el personal autorizado de la FaCyT-UC.', 'error')
                     return redirect(url_for('register'))
 
+                # 2. Verificar si ya se registró previamente en el sistema
                 cursor.execute("SELECT id FROM usuarios WHERE cedula = %s OR correo = %s;", (cedula, correo))
                 if cursor.fetchone():
                     flash('Esta cuenta ya se encuentra registrada. Intenta iniciar sesión.', 'error')
                     return redirect(url_for('register'))
 
+                # 3. Buscar el ID del rol que le corresponde (Admin, Profesor, Estudiante) según el personal autorizado
                 cursor.execute("SELECT id FROM roles WHERE nombre = %s;", (personal['tipo_personal'],))
-                role_id = cursor.fetchone()['id']
+                role_res = cursor.fetchone()
+                if not role_res:
+                    flash('Error interno: El rol asignado en el personal autorizado no es válido.', 'error')
+                    return redirect(url_for('register'))
+                role_id = role_res['id']
 
+                # 4. Encriptar contraseña y guardar al nuevo usuario
                 password_hash = generate_password_hash(password)
-                sql_insert = "INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) VALUES (%s, %s, %s, %s, %s);"
+                sql_insert = """
+                    INSERT INTO usuarios (nombre_completo, correo, password_hash, cedula, role_id) 
+                    VALUES (%s, %s, %s, %s, %s);
+                """
                 cursor.execute(sql_insert, (nombre, correo, password_hash, cedula, role_id))
                 conexion.commit()
 
-                flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
+                flash('¡Registro exitoso! Ya puedes iniciar sesión en la plataforma.', 'success')
                 return redirect(url_for('login'))
+        except Exception as e:
+            print(f"Error en el proceso de Registro: {str(e)}")
+            flash("Error al procesar el registro en la base de datos.", "error")
         finally:
             conexion.close()
+            
     return render_template('register.html')
+
+@app.route('/recuperar-password', methods=['GET', 'POST'])
+def recuperar_password():
+    if request.method == 'POST':
+        correo = request.form.get('correo', '').strip()
+        
+        if not CARACTERES_PERMITIDOS.match(correo):
+            flash("Error: El formato contiene símbolos inválidos.", "error")
+            return redirect(url_for('recuperar_password'))
+        
+        # Flujo institucional simulado para la recuperación
+        flash(f"Si el correo {correo} existe en el sistema FaCyT, recibirás un enlace de restauración de credenciales.", "success")
+        return redirect(url_for('login'))
+        
+    return render_template('recuperar_password.html')
 
 @app.route('/proponer', methods=['GET', 'POST'])
 def proponer_evento():
-    if 'usuario_id' in session:
-        if request.method == 'POST':
-            titulo = request.form['titulo'].strip()
-            tipo_actividad = request.form['tipo_actividad']
-            fecha = request.form['fecha']
-            hora_inicio = request.form['hora_inicio']
-            hora_fin = request.form['hora_fin']
-            creador_id = session['usuario_id']
+    if 'usuario_id' not in session:
+        return redirect(url_for('login'))
+        
+    if request.method == 'POST':
+        titulo = request.form['titulo'].strip()
+        tipo_actividad = request.form['tipo_actividad']
+        fecha = request.form['fecha']
+        hora_inicio = request.form['hora_inicio']
+        hora_fin = request.form['hora_fin']
+        creador_id = session['usuario_id']
 
-            if hora_inicio >= hora_fin:
-                flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
-                return render_template('proponer.html')
+        # Validación lógica de tiempo
+        if hora_inicio >= hora_fin:
+            flash('Error: La hora de inicio debe ser anterior a la de culminación.', 'error')
+            return render_template('proponer.html')
 
-            conexion = obtener_conexion()
-            try:
-                with conexion.cursor() as cursor:
-                    cursor.execute("SELECT id FROM estados WHERE nombre = 'Propuesto';")
-                    estado_id = cursor.fetchone()['id']
+        conexion = obtener_conexion()
+        try:
+            with conexion.cursor() as cursor:
+                # GUSTAZO TÉCNICO: Como el estado inicial 'Solicitado' tiene asignado el ID fijos 1,
+                # lo insertamos directamente de forma estática evitando consultas lentas.
+                estado_inicial_id = 1 
 
-                    sql_evento = """
-                        INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s);
-                    """
-                    cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id))
-                    conexion.commit()
-                    
-                flash('¡Propuesta enviada con éxito! Está en revisión administrativa.', 'success')
-                return redirect(url_for('home'))
-            except Exception as e:
-                flash(f'Error en el sistema al guardar la actividad: {str(e)}', 'error')
-            finally:
-                conexion.close()
+                sql_evento = """
+                    INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id, cupos_disponibles)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NULL);
+                """
+                cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_inicial_id, creador_id))
+                conexion.commit()
+                
+            flash('¡Propuesta enviada con éxito! Ha quedado en estado "Solicitado" para revisión administrativa.', 'success')
+            return redirect(url_for('home'))
+        except Exception as e:
+            print(f"Error al proponer evento: {str(e)}")
+            flash(f'Error en el sistema al guardar la actividad en la base de datos.', 'error')
+        finally:
+            conexion.close()
 
-        return render_template('proponer.html')
-    return redirect(url_for('login'))
+    return render_template('proponer.html')
 
 @app.route('/historial')
 def ver_historial():
-    if 'usuario_id' in session:
-        creador_id = session['usuario_id']
-        conexion = obtener_conexion()
-        eventos = []
-        try:
-            with conexion.cursor() as cursor:
-                sql = """
-                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           est.nombre AS estado_nombre, esp.nombre AS espacio_nombre, e.cupos_disponibles
-                    FROM eventos e
-                    JOIN estados est ON e.estado_id = est.id
-                    LEFT JOIN espacios esp ON e.espacio_id = esp.id
-                    WHERE e.creador_id = %s
-                    ORDER BY e.fecha DESC, e.hora_inicio DESC;
-                """
-                cursor.execute(sql, (creador_id,))
-                eventos = cursor.fetchall()
-                for ev in eventos:
-                    ev['fecha'] = str(ev['fecha'])
-                    ev['hora_inicio'] = str(ev['hora_inicio'])
-                    ev['hora_fin'] = str(ev['hora_fin'])
-                    if ev['cupos_disponibles'] is None:
-                        ev['cupos_disponibles'] = 0
-        except Exception as e:
-            flash(f'Error al cargar el historial: {str(e)}', 'error')
-        finally:
-            conexion.close()
-        return render_template('historial.html', eventos=eventos)
-    return redirect(url_for('login'))
+    if 'usuario_id' not in session:
+        return redirect(url_for('login'))
+        
+    creador_id = session['usuario_id']
+    conexion = obtener_conexion()
+    eventos = []
+    try:
+        with conexion.cursor() as cursor:
+            # Seleccionamos y formateamos los campos utilizando la relación id-estado correcta
+            sql = """
+                SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                       est.nombre AS estado_nombre, esp.nombre AS espacio_nombre, e.cupos_disponibles
+                FROM eventos e
+                JOIN estados est ON e.estado_id = est.id
+                LEFT JOIN espacios esp ON e.espacio_id = esp.id
+                WHERE e.creador_id = %s
+                ORDER BY e.fecha DESC, e.hora_inicio DESC;
+            """
+            cursor.execute(sql, (creador_id,))
+            eventos = cursor.fetchall()
+            
+            # Formateo de tipos nativos (Date/Time) a String para que Jinja2 no tenga problemas al renderizar
+            for ev in eventos:
+                ev['fecha'] = str(ev['fecha'])
+                ev['hora_inicio'] = str(ev['hora_inicio'])[:5]
+                ev['hora_fin'] = str(ev['hora_fin'])[:5]
+                if ev['cupos_disponibles'] is None:
+                    ev['cupos_disponibles'] = "No asignado"
+    except Exception as e:
+        print(f"Error al cargar historial: {str(e)}")
+        flash('Error al cargar el historial de eventos desde el servidor.', 'error')
+    finally:
+        conexion.close()
+        
+    return render_template('historial.html', eventos=eventos)
 
 @app.route('/evento/editar/<int:evento_id>', methods=['GET', 'POST'])
 def editar_evento(evento_id):
-    if 'usuario_id' in session:
-        conexion = obtener_conexion()
-        try:
-            with conexion.cursor() as cursor:
+    if 'usuario_id' not in session:
+        return redirect(url_for('login'))
+        
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            # Buscamos el evento y verificamos si sigue en espera (Estado 'Solicitado' = ID 1)
+            cursor.execute("""
+                SELECT e.*, est.nombre AS estado_nombre 
+                FROM eventos e 
+                JOIN estados est ON e.estado_id = est.id 
+                WHERE e.id = %s AND e.creador_id = %s;
+            """, (evento_id, session['usuario_id']))
+            evento = cursor.fetchone()
+
+            # BLINDAJE: Solo se edita si está 'Solicitado' (ID 1) o 'En Revisión' (ID 2). 
+            # Si ya se Aprobó o Rechazó, el profesor pierde el derecho a modificarlo sin permiso.
+            if not evento or evento['estado_id'] not in [1, 2]:
+                flash('No puedes modificar una actividad que ya fue procesada o aprobada administrativamente.', 'error')
+                return redirect(url_for('ver_historial'))
+
+            if request.method == 'POST':
+                titulo = request.form['titulo'].strip()
+                tipo_actividad = request.form['tipo_actividad']
+                fecha = request.form['fecha']
+                hora_inicio = request.form['hora_inicio']
+                hora_fin = request.form['hora_fin']
+
+                if hora_inicio >= hora_fin:
+                    flash('Error: La hora de inicio debe ser anterior.', 'error')
+                    return redirect(url_for('editar_evento', evento_id=evento_id))
+
                 cursor.execute("""
-                    SELECT e.*, est.nombre AS estado_nombre 
-                    FROM eventos e 
-                    JOIN estados est ON e.estado_id = est.id 
-                    WHERE e.id = %s AND e.creador_id = %s;
-                """, (evento_id, session['usuario_id']))
-                evento = cursor.fetchone()
+                    UPDATE eventos 
+                    SET titulo = %s, tipo_actividad = %s, fecha = %s, hora_inicio = %s, hora_fin = %s 
+                    WHERE id = %s;
+                """, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, evento_id))
+                conexion.commit()
+                flash('Propuesta actualizada correctamente en la lista de espera.', 'success')
+                return redirect(url_for('ver_historial'))
 
-                if not evento or evento['estado_nombre'] != 'Propuesto':
-                    flash('No puedes modificar un evento que ya fue procesado o no te pertenece.', 'error')
-                    return redirect(url_for('ver_historial'))
-
-                if request.method == 'POST':
-                    titulo = request.form['titulo'].strip()
-                    tipo_actividad = request.form['tipo_actividad']
-                    fecha = request.form['fecha']
-                    hora_inicio = request.form['hora_inicio']
-                    hora_fin = request.form['hora_fin']
-
-                    if hora_inicio >= hora_fin:
-                        flash('Error: La hora de inicio debe ser anterior.', 'error')
-                        return redirect(url_for('editar_evento', evento_id=evento_id))
-
-                    cursor.execute("""
-                        UPDATE eventos 
-                        SET titulo = %s, tipo_actividad = %s, fecha = %s, hora_inicio = %s, hora_fin = %s 
-                        WHERE id = %s;
-                    """, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, evento_id))
-                    conexion.commit()
-                    flash('Propuesta actualizada correctamente.', 'success')
-                    return redirect(url_for('ver_historial'))
-
-                evento['fecha'] = str(evento['fecha'])
-                evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
-                evento['hora_fin'] = str(evento['hora_fin'])[:5]
-                return render_template('editar_evento.html', evento=evento)
-        finally:
-            conexion.close()
-    return redirect(url_for('login'))
+            # Convertir formatos de tiempo para desplegar en los inputs tipo 'date' y 'time' del HTML
+            evento['fecha'] = str(evento['fecha'])
+            evento['hora_inicio'] = str(evento['hora_inicio'])[:5]
+            evento['hora_fin'] = str(evento['hora_fin'])[:5]
+            return render_template('editar_evento.html', evento=evento)
+    finally:
+        conexion.close()
 
 @app.route('/evento/eliminar/<int:evento_id>')
 def eliminar_evento(evento_id):
-    if 'usuario_id' in session:
-        conexion = obtener_conexion()
-        try:
-            with conexion.cursor() as cursor:
-                cursor.execute("""
-                    SELECT e.*, est.nombre AS estado_nombre 
-                    FROM eventos e 
-                    JOIN estados est ON e.estado_id = est.id 
-                    WHERE e.id = %s AND e.creador_id = %s;
-                """, (evento_id, session['usuario_id']))
-                evento = cursor.fetchone()
+    if 'usuario_id' not in session:
+        return redirect(url_for('login'))
+        
+    conexion = obtener_conexion()
+    try:
+        with conexion.cursor() as cursor:
+            cursor.execute("SELECT estado_id FROM eventos WHERE id = %s AND creador_id = %s;", (evento_id, session['usuario_id']))
+            evento = cursor.fetchone()
 
-                if evento and evento['estado_nombre'] == 'Propuesto':
-                    cursor.execute("DELETE FROM eventos WHERE id = %s;", (evento_id,))
-                    conexion.commit()
-                    flash('La propuesta ha sido eliminada permanentemente.', 'success')
-                else:
-                    flash('No puedes eliminar este evento.', 'error')
-        except Exception as e:
-            flash(f'Error al eliminar el evento: {str(e)}', 'error')
-        finally:
-            conexion.close()
-        return redirect(url_for('ver_historial'))
-    return redirect(url_for('login'))
+            # Control estricto: Solo permitimos borrar si el estado es 'Solicitado' (ID 1)
+            if evento and evento['estado_id'] == 1:
+                cursor.execute("DELETE FROM eventos WHERE id = %s;", (evento_id,))
+                conexion.commit()
+                flash('La propuesta ha sido retirada y eliminada permanentemente.', 'success')
+            else:
+                flash('No puedes eliminar este evento porque ya se encuentra bajo evaluación o aprobado.', 'error')
+    except Exception as e:
+        print(f"Error al eliminar: {str(e)}")
+        flash('Error al procesar la eliminación del registro.', 'error')
+    finally:
+        conexion.close()
+        
+    return redirect(url_for('ver_historial'))
+
 
 @app.route('/admin/pendientes')
 def admin_pendientes():
