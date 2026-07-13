@@ -512,43 +512,51 @@ def eliminar_evento(evento_id):
         
     return redirect(url_for('ver_historial'))
 
-
 @app.route('/admin/pendientes')
 def admin_pendientes():
-    if 'usuario_id' in session and session.get('rol') in ['ADMIN', 'Administrador', 'Admin']:
-        conexion = obtener_conexion()
-        solicitudes = []
-        espacios = []
-        try:
-            with conexion.cursor() as cursor:
-                sql_solicitudes = """
-                    SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
-                           u.nombre_completo AS solicitante, u.cedula, est.nombre AS estado
-                    FROM eventos e
-                    JOIN usuarios u ON e.creador_id = u.id
-                    JOIN estados est ON e.estado_id = est.id
-                    WHERE est.nombre IN ('Propuesto', 'Solicitado', 'En Revisión')
-                    ORDER BY e.fecha ASC;
-                """
-                cursor.execute(sql_solicitudes)
-                solicitudes = cursor.fetchall()
-                for s in solicitudes:
-                    s['fecha'] = str(s['fecha'])
-                    s['hora_inicio'] = str(s['hora_inicio'])
-                    s['hora_fin'] = str(s['hora_fin'])
+    # Validación estricta de Roles basada en nuestra tabla limpia
+    if 'usuario_id' not in session or session.get('rol') not in ['Admin', 'ADMIN', 'Administrador']:
+        flash("Acceso denegado. Se requieren privilegios de Administrador.", "error")
+        return redirect(url_for('home'))
+        
+    conexion = obtener_conexion()
+    solicitudes = []
+    espacios = []
+    try:
+        with conexion.cursor() as cursor:
+            # Selecciona únicamente los eventos que están en espera de revisión (ID 1: Solicitado o ID 2: En Revisión)
+            sql_solicitudes = """
+                SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
+                       u.nombre_completo AS solicitante, u.cedula, est.nombre AS estado
+                FROM eventos e
+                JOIN usuarios u ON e.creador_id = u.id
+                JOIN estados est ON e.estado_id = est.id
+                WHERE e.estado_id IN (1, 2)
+                ORDER BY e.fecha ASC;
+            """
+            cursor.execute(sql_solicitudes)
+            solicitudes = cursor.fetchall()
+            
+            # Formateo de tiempos para la interfaz gráfica del Administrador
+            for s in solicitudes:
+                s['fecha'] = str(s['fecha'])
+                s['hora_inicio'] = str(s['hora_inicio'])[:5]
+                s['hora_fin'] = str(s['hora_fin'])[:5]
 
-                cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
-                espacios = cursor.fetchall()
-        except Exception as e:
-            flash(f'Error al cargar solicitudes administrativas: {str(e)}', 'error')
-        finally:
-            conexion.close()
-        return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
-    return redirect(url_for('login'))
+            # Cargamos los espacios físicos disponibles (con nombres actualizados de la tabla 'espacios')
+            cursor.execute("SELECT id, nombre, capacidad FROM espacios ORDER BY nombre ASC;")
+            espacios = cursor.fetchall()
+    except Exception as e:
+        print(f"Error al cargar panel administrativo: {str(e)}")
+        flash('Error al cargar la lista de solicitudes desde el servidor.', 'error')
+    finally:
+        conexion.close()
+        
+    return render_template('admin_pendientes.html', solicitudes=solicitudes, espacios=espacios)
 
 @app.route('/admin/procesar/<int:evento_id>', methods=['POST'])
 def procesar_solicitud(evento_id):
-    if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
+    if 'usuario_id' not in session or session.get('rol') not in ['Admin', 'ADMIN', 'Administrador']:
         flash("Acceso denegado.", "error")
         return redirect(url_for('home'))
         
@@ -558,63 +566,84 @@ def procesar_solicitud(evento_id):
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # --- BLOQUE DE AUTO-REPARACIÓN DE EMERGENCIA ---
-            # Verificamos si la tabla estados tiene registros
-            cursor.execute("SELECT COUNT(*) FROM estados;")
-            conteo = cursor.fetchone()
-            total_estados = conteo['COUNT(*)'] if isinstance(conteo, dict) else conteo[0]
             
-            # Si la tabla está vacía, insertamos los 6 estados con sus IDs correctos de inmediato
-            if total_estados == 0:
-                cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-                valores = [
-                    (1, 'Solicitado'),
-                    (2, 'En Revisión'),
-                    (3, 'Aprobado'),
-                    (4, 'Realizado'),
-                    (5, 'Cancelado'),
-                    (6, 'Rechazado')
-                ]
-                cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores)
-                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-                conexion.commit()
-            # --------------------------------------------------
-
             if accion == 'rechazar':
-                # Buscamos el ID de 'Rechazado' (ahora garantizado que existe gracias al bloque superior)
-                cursor.execute("SELECT id FROM estados WHERE nombre LIKE 'Rechazado%' LIMIT 1;")
-                res_estado = cursor.fetchone()
-                estado_id = res_estado['id'] if isinstance(res_estado, dict) else res_estado[0] if res_estado else 6
-                
-                # Actualizamos el evento a rechazado
-                sql = "UPDATE eventos SET estado_id = %s WHERE id = %s;"
-                cursor.execute(sql, (estado_id, evento_id))
+                # ACCIÓN 1: Rechazar la propuesta (ID estático 6)
+                sql = "UPDATE eventos SET estado_id = 6 WHERE id = %s;"
+                cursor.execute(sql, (evento_id,))
+                conexion.commit()
                 flash("La solicitud ha sido rechazada con éxito.", "success")
                 
             else:
-                # SI ES APROBACIÓN
+                # ACCIÓN 2: Aprobar la propuesta (Requiere un espacio físico asignado)
                 if not espacio_id or espacio_id == "":
-                    flash("Error: Debe asignar un espacio físico para aprobar el evento.", "error")
+                    flash("Error: Debe asignar un espacio físico para poder aprobar el evento.", "error")
                     return redirect(url_for('admin_pendientes'))
                 
-                # Buscamos el ID de 'Aprobado'
-                cursor.execute("SELECT id FROM estados WHERE nombre LIKE 'Aprobado%' LIMIT 1;")
-                res_estado = cursor.fetchone()
-                estado_id = res_estado['id'] if isinstance(res_estado, dict) else res_estado[0] if res_estado else 3
+                # Modificamos el evento a estado Aprobado (ID 3) y le asignamos el aula
+                sql = "UPDATE eventos SET estado_id = 3, espacio_id = %s WHERE id = %s;"
+                cursor.execute(sql, (espacio_id, evento_id))
+                conexion.commit()
                 
-                # Actualizamos estado y asignamos el espacio físico
-                sql = "UPDATE eventos SET estado_id = %s, espacio_id = %s WHERE id = %s;"
-                cursor.execute(sql, (estado_id, espacio_id, evento_id))
-                flash("La solicitud ha sido aprobada y el espacio fue asignado.", "success")
+                # ====================================================================
+                # AUTOMATIZACIÓN: MOTOR DE DIVULGACIÓN E INSCRIPCIÓN INSTITUCIONAL
+                # ====================================================================
+                try:
+                    # 1. Buscamos los datos del evento aprobado y su espacio físico real
+                    sql_info = """
+                        SELECT e.titulo, e.fecha, e.hora_inicio, e.hora_fin, esp.nombre, esp.capacidad 
+                        FROM eventos e
+                        JOIN espacios esp ON e.espacio_id = esp.id
+                        WHERE e.id = %s;
+                    """
+                    cursor.execute(sql_info, (evento_id,))
+                    info_evento = cursor.fetchone()
+                    
+                    if info_evento:
+                        # Extraemos los datos según el formato del diccionario
+                        titulo = info_evento['titulo']
+                        fecha = str(info_evento['fecha'])
+                        horario = f"{str(info_evento['hora_inicio'])[:5]} - {str(info_evento['hora_fin'])[:5]}"
+                        aula = info_evento['nombre']
+                        capacidad_max = info_evento['capacidad']
+                        
+                        # 2. Sincronizamos los cupos iniciales del evento basándonos en el aforo del espacio físico asignado
+                        cursor.execute("UPDATE eventos SET cupos_disponibles = %s WHERE id = %s;", (capacidad_max, evento_id))
+                        conexion.commit()
+                        
+                        # 3. Extraemos los correos electrónicos de todos los Alumnos registrados para la divulgación masiva
+                        cursor.execute("""
+                            SELECT u.correo FROM usuarios u 
+                            JOIN roles r ON u.role_id = r.id 
+                            WHERE r.nombre = 'Estudiante';
+                        """)
+                        lista_usuarios = cursor.fetchall()
+                        
+                        correos_destinatarios = [u['correo'] for u in lista_usuarios if u.get('correo')]
+                        
+                        # Si aún no hay alumnos en el sistema, enviamos una prueba al emisor
+                        if not correos_destinatarios:
+                            correos_destinatarios = [EMAIL_EMISOR]
+                            
+                        # 4. Despachamos el correo electrónico institucional
+                        enviar_correo_divulgacion(correos_destinatarios, titulo, fecha, horario, aula)
+                        flash("La solicitud fue aprobada, los cupos inicializados y divulgada por email.", "success")
+                        
+                except Exception as ex_mail:
+                    print(f"Error no crítico en el envío de correos: {str(ex_mail)}")
+                    flash("El evento fue aprobado con éxito, pero la difusión por correo experimentó un retraso físico.", "warning")
                 
-        conexion.commit()
     except Exception as e:
-        flash(f"Error al procesar la solicitud: {str(e)}", "error")
+        print(f"Error al procesar la solicitud: {str(e)}")
+        flash(f"Error interno al procesar la solicitud administrativa.", "error")
     finally:
         conexion.close()
         
     return redirect(url_for('admin_pendientes'))
 
+# NOTA DE DEPURACIÓN: Hemos ELIMINADO por completo la ruta '/admin/reparar_tabla_estados_secreta'.
+# Como configuramos correctamente los IDs estáticos fijos en la inicialización (1 al 6),
+# mantener una ruta secreta que borre y altere los IDs dinámicamente es una vulnerabilidad técnica.
 
 @app.route('/cartelera')
 def cartelera_eventos():
