@@ -261,7 +261,7 @@ def enviar_correo_divulgacion(destinatarios, titulo_evento, fecha, horario, aula
 #---------------------- RUTAS PRINCIPALES DE LA APLICACIÓN ---------------------------
 @app.route('/')
 def home():
-    #inicializar_base_de_datos()
+    inicializar_base_de_datos()
     if 'usuario_id' in session:
         conexion = obtener_conexion()
         estadisticas = {}
