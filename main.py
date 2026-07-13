@@ -6,6 +6,17 @@ from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# ==========================================
+# CONFIGURACIÓN PARA LA DIVULGACIÓN POR EMAIL
+# ==========================================
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_EMISOR = "arciayosi@gmail.com"  # Reemplaza por el correo de la facultad/pruebas
+EMAIL_PASSWORD = "DrakoM0810."       # Reemplaza por tu contraseña de aplicación de Google
 
 load_dotenv()
 
@@ -105,13 +116,13 @@ def inicializar_base_de_datos():
                 cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
 
             usuarios_autorizados = [
-                ('12345678', 'admin.facyt@uc.edu.ve', 'Admin'),
-                ('22222222', 'profesor.facyt@uc.edu.ve', 'Profesor'),
-                ('33333333', 'estudiante.facyt@uc.edu.ve', 'Estudiante')
+                ('27894120', 'arciayosi@gmail.com', 'Admin'),
+                ('22222222', 'yosi12141@gmail.com', 'Profesor'),
+                ('33333333', 'yarcia@uc.edu.ve', 'Estudiante')
             ]
             cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
 
-            cursor.execute("SELECT id FROM usuarios WHERE correo = 'admin.facyt@uc.edu.ve';")
+            cursor.execute("SELECT id FROM usuarios WHERE correo = 'arciayosi@gmail.com';")
             if not cursor.fetchone():
                 cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
                 role_id = cursor.fetchone()['id']
@@ -581,6 +592,7 @@ def admin_cartelera():
             conexion.close()
         return render_template('admin_cartelera.html', eventos=eventos)
     return redirect(url_for('login'))
+
 @app.route('/admin/reparar_tabla_estados_secreta')
 def reparar_tabla_estados():
     if 'usuario_id' not in session or session.get('rol') not in ['ADMIN', 'Administrador', 'Admin']:
@@ -754,6 +766,65 @@ def inscribir_en_evento(evento_id):
         return redirect(url_for('admin_cartelera' if rol_actual in ['ADMIN','Administrador','Admin'] else 'cartelera_eventos'))
     return redirect(url_for('login'))
 
+def enviar_correo_divulgacion(destinatarios, titulo_evento, fecha, hora, espacio):
+    """
+    Construye y envía el correo electrónico para cumplir con la divulgación de eventos.
+    """
+    if not destinatarios:
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_EMISOR
+    # Convertimos la lista de correos en una cadena separada por comas
+    msg['To'] = ", ".join(destinatarios) if isinstance(destinatarios, list) else destinatarios
+    msg['Subject'] = f"📢 ¡Nuevo Evento Publicado!: {titulo_evento}"
+
+    # Cuerpo del mensaje en formato HTML limpio y adaptado
+    cuerpo_html = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+            <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                <div style="background-color: #1e3a8a; color: white; padding: 20px; text-align: center;">
+                    <h2 style="margin: 0;">SGC - FaCyT</h2>
+                    <p style="margin: 5px 0 0 0; font-size: 14px;">Divulgación Oficial de Actividades Académicas</p>
+                </div>
+                <div style="padding: 20px;">
+                    <p>Estimada comunidad universitaria,</p>
+                    <p>Nos complace invitarlos al próximo evento que ha sido incorporado a nuestra cartelera oficial:</p>
+                    
+                    <div style="background-color: #f3f4f6; border-left: 4px solid #1e3a8a; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                        <h3 style="margin: 0 0 10px 0; color: #1e3a8a;">{titulo_evento}</h3>
+                        <p style="margin: 5px 0;"><strong>📍 Ubicación:</strong> {espacio}</p>
+                        <p style="margin: 5px 0;"><strong>📅 Fecha:</strong> {fecha}</p>
+                        <p style="margin: 5px 0;"><strong>⏰ Horario:</strong> {hora}</p>
+                    </div>
+                    
+                    <p>Ya puedes ingresar al portal del sistema para apartar tu cupo y registrar tu asistencia.</p>
+                    <p style="text-align: center; margin-top: 30px;">
+                        <a href="http://localhost:5000/cartelera" style="background-color: #1e3a8a; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Ver en la Cartelera</a>
+                    </p>
+                </div>
+                <div style="background-color: #f9fafb; color: #666; padding: 10px; text-align: center; font-size: 12px; border-top: 1px solid #ddd;">
+                    Este es un correo automatizado de la plataforma, por favor no lo respondas.
+                </div>
+            </div>
+        </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(cuerpo_html, 'html'))
+
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_EMISOR, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_EMISOR, destinatarios, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Error enviando correo de divulgación: {str(e)}")
+        return False
+    
 @app.route('/logout')
 def logout():
     session.clear()
