@@ -50,7 +50,7 @@ def inicializar_base_de_datos():
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            # 1. DESACTIVACIÓN DE RESTRICCIONES PARA LIMPIEZA TOTAL
+            """# 1. DESACTIVACIÓN DE RESTRICCIONES PARA LIMPIEZA TOTAL
             cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
             
             # 2. DROP TABLES: Reseteo controlado para reestructurar IDs
@@ -59,11 +59,11 @@ def inicializar_base_de_datos():
                 cursor.execute(f"DROP TABLE IF EXISTS {tabla};")
             
             cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-            print("¡Base de datos limpia desde cero!")
+            print("¡Base de datos limpia desde cero!")"""
 
             # 3. CREACIÓN DE TABLAS MAESTRAS (Sin Auto-Incremento en estados)
             cursor.execute("""
-                CREATE TABLE personal_autorizado (
+                CREATE TABLE IF NOT EXISTS personal_autorizado (
                     cedula VARCHAR(20) PRIMARY KEY, 
                     correo_institucional VARCHAR(100) UNIQUE NOT NULL, 
                     tipo_personal VARCHAR(20) NOT NULL
@@ -71,14 +71,14 @@ def inicializar_base_de_datos():
             """)
             
             cursor.execute("""
-                CREATE TABLE roles (
+                CREATE TABLE IF NOT EXISTS roles (
                     id INT AUTO_INCREMENT PRIMARY KEY, 
                     nombre VARCHAR(20) UNIQUE NOT NULL
                 );
             """)
             
             cursor.execute("""
-                CREATE TABLE usuarios (
+                CREATE TABLE IF NOT EXISTS usuarios (
                     id INT AUTO_INCREMENT PRIMARY KEY, 
                     nombre_completo VARCHAR(100) NOT NULL, 
                     correo VARCHAR(100) UNIQUE NOT NULL, 
@@ -90,7 +90,7 @@ def inicializar_base_de_datos():
             """)
             
             cursor.execute("""
-                CREATE TABLE espacios (
+                CREATE TABLE IF NOT EXISTS espacios (
                     id INT AUTO_INCREMENT PRIMARY KEY, 
                     nombre VARCHAR(50) UNIQUE NOT NULL, 
                     tipo VARCHAR(30) NOT NULL, 
@@ -101,7 +101,7 @@ def inicializar_base_de_datos():
             
             # --- CORRECCIÓN CRÍTICA: ID ESTÁTICO MANUAL ---
             cursor.execute("""
-                CREATE TABLE estados (
+                CREATE TABLE IF NOT EXISTS estados (
                     id INT PRIMARY KEY, 
                     nombre VARCHAR(20) UNIQUE NOT NULL
                 );
@@ -121,7 +121,7 @@ def inicializar_base_de_datos():
 
             # 5. CREACIÓN DE TABLAS TRANSACCIONALES
             cursor.execute("""
-                CREATE TABLE eventos (
+                CREATE TABLE IF NOT EXISTS eventos (
                     id INT AUTO_INCREMENT PRIMARY KEY, 
                     titulo VARCHAR(150) NOT NULL, 
                     tipo_actividad VARCHAR(50) NOT NULL, 
@@ -130,17 +130,17 @@ def inicializar_base_de_datos():
                     hora_fin TIME NOT NULL, 
                     estado_id INT DEFAULT 1, 
                     espacio_id INT NULL, 
-                    creador_id INT NOT NULL,
+                    usuario_id INT NOT NULL,
                     cupos_disponibles INT NULL,
                     fecha_elim VARCHAR(10) NULL,
                     FOREIGN KEY (estado_id) REFERENCES estados(id), 
                     FOREIGN KEY (espacio_id) REFERENCES espacios(id), 
-                    FOREIGN KEY (creador_id) REFERENCES usuarios(id)
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
                 );
             """)
 
             cursor.execute("""
-                CREATE TABLE  inscripciones (
+                CREATE TABLE IF NOT EXISTS inscripciones (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     usuario_id INT NOT NULL,
                     evento_id INT NOT NULL,
@@ -151,22 +151,22 @@ def inicializar_base_de_datos():
                 );
             """)
             
-            # 6. POBLADO DE DATOS MAESTROS DE CONTROL
-            cursor.executemany("INSERT INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+            # 6. INICIALIZACION DE DATOS DE CONTROL
+            cursor.executemany("INSERT IGNORE INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
 
             espacios_facyt = [
                 ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
                 ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
                 ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
             ]
-            cursor.executemany("INSERT INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+            cursor.executemany("INSERT IGNORE INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
 
             usuarios_autorizados = [
                 ('27894120', 'arciayosi@gmail.com', 'Admin'),
                 ('22222222', 'yosi12141@gmail.com', 'Profesor'),
                 ('33333333', 'yarcia@uc.edu.ve', 'Estudiante')
             ]
-            cursor.executemany("INSERT INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
 
             # 7. CREACIÓN DEL ADMINISTRADOR POR DEFECTO
             cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
@@ -444,7 +444,7 @@ def proponer_evento():
         fecha = request.form['fecha']
         hora_inicio = request.form['hora_inicio']
         hora_fin = request.form['hora_fin']
-        creador_id = session['usuario_id']
+        usuario_id = session['usuario_id']
 
         # Validación lógica de tiempo
         if hora_inicio >= hora_fin:
@@ -459,10 +459,10 @@ def proponer_evento():
                 estado_inicial_id = 1 
 
                 sql_evento = """
-                    INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, creador_id, cupos_disponibles)
+                    INSERT INTO eventos (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_id, usuario_id, cupos_disponibles)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, NULL);
                 """
-                cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_inicial_id, creador_id))
+                cursor.execute(sql_evento, (titulo, tipo_actividad, fecha, hora_inicio, hora_fin, estado_inicial_id, usuario_id))
                 conexion.commit()
                 
             flash('¡Propuesta enviada con éxito! Ha quedado en estado "Solicitado" para revisión administrativa.', 'success')
@@ -480,7 +480,7 @@ def ver_historial():
     if 'usuario_id' not in session:
         return redirect(url_for('login'))
         
-    creador_id = session['usuario_id']
+    usuario_id = session['usuario_id']
     conexion = obtener_conexion()
     eventos = []
     try:
@@ -492,10 +492,10 @@ def ver_historial():
                 FROM eventos e
                 JOIN estados est ON e.estado_id = est.id
                 LEFT JOIN espacios esp ON e.espacio_id = esp.id
-                WHERE e.creador_id = %s
+                WHERE e.usuario_id = %s
                 ORDER BY e.fecha DESC, e.hora_inicio DESC;
             """
-            cursor.execute(sql, (creador_id,))
+            cursor.execute(sql, (usuario_id,))
             eventos = cursor.fetchall()
             
             # Formateo de tipos nativos (Date/Time) a String para que Jinja2 no tenga problemas al renderizar
@@ -526,7 +526,7 @@ def editar_evento(evento_id):
                 SELECT e.*, est.nombre AS estado_nombre 
                 FROM eventos e 
                 JOIN estados est ON e.estado_id = est.id 
-                WHERE e.id = %s AND e.creador_id = %s;
+                WHERE e.id = %s AND e.usuario_id = %s;
             """, (evento_id, session['usuario_id']))
             evento = cursor.fetchone()
 
@@ -572,7 +572,7 @@ def eliminar_evento(evento_id):
     conexion = obtener_conexion()
     try:
         with conexion.cursor() as cursor:
-            cursor.execute("SELECT estado_id FROM eventos WHERE id = %s AND creador_id = %s;", (evento_id, session['usuario_id']))
+            cursor.execute("SELECT estado_id FROM eventos WHERE id = %s AND usuario_id = %s;", (evento_id, session['usuario_id']))
             evento = cursor.fetchone()
 
             # Control estricto: Solo permitimos borrar si el estado es 'Solicitado' (ID 1)
@@ -607,7 +607,7 @@ def admin_pendientes():
                 SELECT e.id, e.titulo, e.tipo_actividad, e.fecha, e.hora_inicio, e.hora_fin, 
                        u.nombre_completo AS solicitante, u.cedula, est.nombre AS estado
                 FROM eventos e
-                JOIN usuarios u ON e.creador_id = u.id
+                JOIN usuarios u ON e.usuario_id = u.id
                 JOIN estados est ON e.estado_id = est.id
                 WHERE e.estado_id IN (1, 2)
                 ORDER BY e.fecha ASC;
