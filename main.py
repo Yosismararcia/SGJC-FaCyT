@@ -116,8 +116,10 @@ def inicializar_base_de_datos():
                 (5, 'Cancelado'),
                 (6, 'Rechazado')
             ]
-            cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores_estados)
-            print("Estados estáticos (1-6) inyectados con éxito.")
+            cursor.execute("SELECT COUNT(*) AS total FROM estados;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT INTO estados (id, nombre) VALUES (%s, %s);", valores_estados)
+                print("Estados estáticos (1-6) inyectados con éxito.")
 
             # 5. CREACIÓN DE TABLAS TRANSACCIONALES
             cursor.execute("""
@@ -152,24 +154,33 @@ def inicializar_base_de_datos():
             """)
             
             # 6. INICIALIZACION DE DATOS DE CONTROL
-            cursor.executemany("INSERT IGNORE INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+            cursor.execute("SELECT COUNT(*) AS total FROM roles;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT IGNORE INTO roles (nombre) VALUES (%s);", [('Admin',), ('Profesor',), ('Estudiante',)])
+                print("Roles base inicializados.")
 
             espacios_facyt = [
                 ('Auditorio FaCyT', 'Auditorio', 150, 'Planta Baja, Edificio de Aulas'),
                 ('Laboratorio de Computación 1', 'Laboratorio', 30, 'Primer Piso, Ala Norte'),
                 ('Aula Magna 202', 'Aula de Clases', 45, 'Segundo Piso, Edificio de Aulas')
             ]
-            cursor.executemany("INSERT IGNORE INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+            cursor.execute("SELECT COUNT(*) AS total FROM espacios;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT IGNORE INTO espacios (nombre, tipo, capacidad, ubicacion) VALUES (%s, %s, %s, %s);", espacios_facyt)
+                print("Espacios físicos inicializados en la base de datos.")
 
             usuarios_autorizados = [
                 ('27894120', 'arciayosi@gmail.com', 'Admin'),
                 ('22222222', 'yosi12141@gmail.com', 'Profesor'),
                 ('33333333', 'yarcia@uc.edu.ve', 'Estudiante')
             ]
-            cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+            cursor.execute("SELECT COUNT(*) AS total FROM personal_autorizado;")
+            if cursor.fetchone()['total'] == 0:
+                cursor.executemany("INSERT IGNORE INTO personal_autorizado (cedula, correo_institucional, tipo_personal) VALUES (%s, %s, %s);", usuarios_autorizados)
+                print("Personal autorizado inicializado en la base de datos.")
 
             # 7. CREACIÓN DEL ADMINISTRADOR POR DEFECTO
-            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin';")
+            cursor.execute("SELECT id FROM roles WHERE nombre = 'Admin' or nombre = 'Administrador';")
             role_id = cursor.fetchone()['id']
             pass_hash = generate_password_hash('admin123')
             cursor.execute("""
